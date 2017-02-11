@@ -10,6 +10,7 @@ public class SelfPeer {
    private int listenport; // port number this peer listens on
    private ServerSocket listener; // socket this peer listens on
    private NeighborPeer[] neighbors; // other peers
+   private Boolean finished = false; // whether the peer sharing process is finished
 
    /**
     * Constructor for this peer
@@ -38,26 +39,38 @@ public class SelfPeer {
     */
    public void listenForConnection() throws Exception {
 
-      // Listen for connection from another peer. Waits until connected. 
-      Socket connection = this.listener.accept();
-
-      // Connection started. Go do whatever.
-      this.processConnection(connection);
-
-      connection.close();
+      while (!this.finished) {
+         // Listen for connection from another peer. 
+         // Once connection started, does whatever in a separate thread.
+         new ProcessConnection(this.listener.accept()).start();
+      }
    }
 
    /**
-    * Do whatever needs to be done with this connection
-    * TODO: Probably need to be a new thread
+    * Thread class to process a connection between this and another peer
     */
-   public void processConnection(Socket connection) throws Exception {
+   private static class ProcessConnection extends Thread {
+      
+      private Socket connection; // the connection the peers are communicating on
+      private ObjectInputStream in;
 
-      ObjectInputStream in = new ObjectInputStream(connection.getInputStream());
-      // read in message
-      String msg = (String) in.readObject();
-      System.out.println(msg);
-      in.close();
+      public ProcessConnection(Socket connection) {
+         
+         this.connection = connection;
+      }
+
+      public void run() {
+
+         try {
+            this.in = new ObjectInputStream(this.connection.getInputStream());
+            String msg = (String) in.readObject();
+            System.out.println(msg);
+            in.close();
+            connection.close();
+         } catch (Exception e) {
+            //TODO: something ...
+         }
+      }
 
    }
 
@@ -71,6 +84,7 @@ public class SelfPeer {
       Socket connection = new Socket("localhost", port);
       ObjectOutputStream out = new ObjectOutputStream(connection.getOutputStream());
       // write message
+      out.writeObject("Hello World!");
       out.flush();
       connection.close();
    } 
