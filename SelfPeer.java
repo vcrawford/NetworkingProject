@@ -11,6 +11,15 @@ public class SelfPeer {
    private ServerSocket listener; // socket this peer listens on
    private NeighborPeer[] neighbors; // other peers
    private Boolean finished = false; // whether the peer sharing process is finished
+   private static final String configfilename = "Common.cfg";
+
+   // variables set in config file
+   private int NumberOfPreferredNeighbors;
+   private int UnchokingInterval;
+   private int OptimisticUnchokingInterval;
+   private String FileName;
+   private int FileSize;
+   private int PieceSize;
 
    /**
     * Constructor for this peer
@@ -22,6 +31,45 @@ public class SelfPeer {
       this.peerid = id;
       this.listenport = port;
       this.listener = new ServerSocket(this.listenport);
+      readConfigFile();
+   }
+
+   /**
+    * Read in variables from config file, set all appropriate variables
+    */
+   private void readConfigFile() {
+
+      try {
+         BufferedReader reader = new BufferedReader(new FileReader(this.configfilename));
+         String line = reader.readLine();
+         String[] split_line = line.split(" ");
+
+         while (line != null) {
+
+            switch (split_line[0]) {
+               case "NumberOfPreferredNeighbors":
+                  this.NumberOfPreferredNeighbors = Integer.parseInt(split_line[1]);
+               case "UnchokingInterval":
+                  this.UnchokingInterval = Integer.parseInt(split_line[1]);
+               case "OptimisticUnchokingInterval":
+                  this.OptimisticUnchokingInterval = Integer.parseInt(split_line[1]);
+               case "FileName":
+                  this.FileName = split_line[1];
+               case "FileSize":
+                  this.FileSize = Integer.parseInt(split_line[1]);
+               case "PieceSize":
+                  this.PieceSize = Integer.parseInt(split_line[1]);
+            }
+
+            line = reader.readLine();
+            split_line = line.split(" ");
+         }
+
+         reader.close();
+
+      } catch (Exception e) {
+         // TODO: something ...
+      }
 
    }
 
