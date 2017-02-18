@@ -9,6 +9,7 @@ public class NeighborPeer{
    public NeighborPeer(int id, int port) {
 
       this.peerid = id;
+      this.port = port;
    }
 
    public int getID() {

@@ -1,184 +1,200 @@
-import java.net.*;
+import java.net.*; //classes related to sockets
 import java.io.*;
+import java.util.*; //HashMap
 
 /**
  * Represents the peer that is running on this process
  */
 public class PeerProcess {
 
-   private int peerid; // the id of this peer
-   private int listenport; // port number this peer listens on
-   private ServerSocket listener; // socket this peer listens on
-   private NeighborPeer[] neighbors; // other peers
-   private Boolean finished = false; // whether the peer sharing process is finished
-   private static final String commonCfgFileName = "Common.cfg";
-   private static final String peerInfoFileName = "PeerInfo.cfg";
+	private int peerid; // the id of this peer
+	private int listenport; // port number this peer listens on
+	private ServerSocket listener; // socket this peer listens on
+	HashMap<Integer, NeighborPeer> neighbors = new HashMap<Integer, NeighborPeer>();
+	private Boolean finished = false; // whether the peer sharing process is
+										// finished
+	private static final String commonCfgFileName = "Common.cfg";
+	private static final String peerInfoFileName = "PeerInfo.cfg";
 
-   // variables set in config file
-   private int NumberOfPreferredNeighbors;
-   private int UnchokingInterval;
-   private int OptimisticUnchokingInterval;
-   private String FileName;
-   private int FileSize;
-   private int PieceSize;
-   
-   public static void main(String[] args) throws IOException {
-	   int id = Integer.parseInt(args[0]);
-	   PeerProcess peerProcess = new PeerProcess(id);
-   }
-   
-   /**
-    * Constructor for this peer
-    * port is the port number this peer will listen on
-    * TODO: right now, all peers are on localhost, need to change
-    */   
-   public PeerProcess(int id) throws IOException {
-	      this.peerid = id;
-	      readCommonCfgFile();
-	      readPeerInfoCfgFile();
+	// variables set in config file
+	private int NumberOfPreferredNeighbors;
+	private int UnchokingInterval;
+	private int OptimisticUnchokingInterval;
+	private String FileName;
+	private int FileSize;
+	private int PieceSize;
 
-    	  System.out.format("Peer: %d Port: %d\n", 
-    			  this.peerid, this.listenport);	      
-	      
-	      this.listener = new ServerSocket(this.listenport);
-   }
-   
-   /**
-    * Read in variables from config file, set all appropriate variables
-    */
-   public void readPeerInfoCfgFile() {
-      try {
-         BufferedReader reader = new BufferedReader(new FileReader(this.peerInfoFileName));
-         String line = reader.readLine();
-         String[] split_line = line.split(" ");
+	public static void main(String[] args) throws IOException {
+		int id = Integer.parseInt(args[0]);
+		PeerProcess peerProcess = new PeerProcess(id);
+	}
 
-         //Loop over all lines in config file
-         while (line != null) {
-        	 if (! line.startsWith("#")){ //ignore comments
-	        	 int id = Integer.parseInt(split_line[0]);
-	        	 String hostname = split_line[1];
-	        	 int port = Integer.parseInt(split_line[2]);
-	        	 boolean hasFile = (split_line[3].equals("1"));
-	        	 
-	             //TODO: Add neighboring peers' info to NeighborPeer array here
-	        	 
-	        	 //Set current peer's port number
-	        	 if (id == this.peerid){
-	        		 this.listenport = port;
-	        	 }
-        	 }
+	/**
+	 * Constructor for this peer port is the port number this peer will listen
+	 * on TODO: right now, all peers are on localhost, need to change
+	 */
+	public PeerProcess(int id) throws IOException {
+		this.peerid = id;
+		readCommonCfgFile();
+		readPeerInfoCfgFile();
 
-             line = reader.readLine();
-             split_line = line.split(" ");
-          }         
-         reader.close();
+		System.out.format("Peer: %d Port: %d\n", this.peerid, this.listenport);
+		this.listener = new ServerSocket(this.listenport);
+	}
 
-      } catch (Exception e) {
-         // TODO: something ...
-      }
-   }   
-   
-   /**
-    * Read in variables from config file, set all appropriate variables
-    */
-   private void readCommonCfgFile() {
+	/**
+	 * Prints neighbor information on screen. 
+	 * Used for debugging purpose only.
+	 */
+	private void printNeighbors() {
+		for (NeighborPeer nbr : this.neighbors.values()) {
+			System.out.format("%d %d\n", nbr.getID(), nbr.getPort());
+		}
 
-      try {
-         BufferedReader reader = new BufferedReader(new FileReader(this.commonCfgFileName));
-         String line = reader.readLine();
-         String[] split_line = line.split(" ");
+		return;
+	}
 
-         while (line != null) {
+	/**
+	 * Read in variables from config file, set all appropriate variables
+	 */
+	public void readPeerInfoCfgFile() {
+		try {
+			BufferedReader reader = new BufferedReader(new FileReader(
+					this.peerInfoFileName));
+			String line = reader.readLine();
+			String[] split_line = line.split(" ");
 
-            switch (split_line[0]) {
-               case "NumberOfPreferredNeighbors":
-                  this.NumberOfPreferredNeighbors = Integer.parseInt(split_line[1]);
-                  break;
-               case "UnchokingInterval":
-                  this.UnchokingInterval = Integer.parseInt(split_line[1]);
-                  break;                  
-               case "OptimisticUnchokingInterval":
-                  this.OptimisticUnchokingInterval = Integer.parseInt(split_line[1]);
-                  break;                  
-               case "FileName":
-                  this.FileName = split_line[1];
-                  break;                  
-               case "FileSize":
-                  this.FileSize = Integer.parseInt(split_line[1]);
-                  break;                  
-               case "PieceSize":
-                  this.PieceSize = Integer.parseInt(split_line[1]);
-                  break;                  
-            }
+			// Loop over all lines in config file
+			while (line != null) {
+				if (!line.startsWith("#")) { // ignore comments
+					int id = Integer.parseInt(split_line[0]);
+					String hostname = split_line[1];
+					int port = Integer.parseInt(split_line[2]);
+					boolean hasFile = (split_line[3].equals("1"));
 
-            line = reader.readLine();
-            split_line = line.split(" ");
-         }
+					NeighborPeer nbr = new NeighborPeer(id, port);
 
-         reader.close();
+					// Add neighboring peers' info to NeighborPeer hash-map
+					this.neighbors.put(id, nbr);
+				}
 
-      } catch (Exception e) {
-         // TODO: something ...
-      }
+				// Set current peer's port number
+				this.listenport = (this.neighbors.get(this.peerid)).getPort();
 
-   }
+				line = reader.readLine();
+				split_line = line.split(" ");
+			}
+			reader.close();
 
-   /**
-    * Listen for a message
-    * TODO: Need to actually continue listening after one message
-    * TODO: Multithreading
-    */
-   public void listenForConnection() throws Exception {
+		} catch (Exception e) {
+			// TODO: something ...
+		}
+	}
 
-      while (!this.finished) {
-         // Listen for connection from another peer. 
-         // Once connection started, does whatever in a separate thread.
-         new ProcessConnection(this.listener.accept()).start();
-      }
-   }
+	/**
+	 * Read in variables from config file, set all appropriate variables
+	 */
+	private void readCommonCfgFile() {
 
-   /**
-    * Thread class to process a connection between this and another peer
-    */
-   private static class ProcessConnection extends Thread {
-      
-      private Socket connection; // the connection the peers are communicating on
-      private ObjectInputStream in;
+		try {
+			BufferedReader reader = new BufferedReader(new FileReader(
+					this.commonCfgFileName));
+			String line = reader.readLine();
+			String[] split_line = line.split(" ");
 
-      public ProcessConnection(Socket connection) {
-         
-         this.connection = connection;
-      }
+			while (line != null) {
 
-      public void run() {
+				switch (split_line[0]) {
+				case "NumberOfPreferredNeighbors":
+					this.NumberOfPreferredNeighbors = Integer
+							.parseInt(split_line[1]);
+					break;
+				case "UnchokingInterval":
+					this.UnchokingInterval = Integer.parseInt(split_line[1]);
+					break;
+				case "OptimisticUnchokingInterval":
+					this.OptimisticUnchokingInterval = Integer
+							.parseInt(split_line[1]);
+					break;
+				case "FileName":
+					this.FileName = split_line[1];
+					break;
+				case "FileSize":
+					this.FileSize = Integer.parseInt(split_line[1]);
+					break;
+				case "PieceSize":
+					this.PieceSize = Integer.parseInt(split_line[1]);
+					break;
+				}
 
-         try {
-            this.in = new ObjectInputStream(this.connection.getInputStream());
-            String msg = (String) in.readObject();
-            System.out.println(msg);
-            in.close();
-            connection.close();
-         } catch (Exception e) {
-            //TODO: something ...
-         }
-      }
+				line = reader.readLine();
+				split_line = line.split(" ");
+			}
 
-   }
+			reader.close();
 
-   /**
-    * Send a message to another peer
-    * TODO: Not just send messages to localhost
-    * TODO: Send things over just one TCP connection
-    */
-   public void sendMessage(int port) throws IOException {
+		} catch (Exception e) {
+			// TODO: something ...
+		}
 
-      Socket connection = new Socket("localhost", port);
-      ObjectOutputStream out = new ObjectOutputStream(connection.getOutputStream());
-      // write message
-      out.writeObject("Hello World!");
-      out.flush();
-      connection.close();
-   } 
+	}
+
+	/**
+	 * Listen for a message TODO: Need to actually continue listening after one
+	 * message TODO: Multithreading
+	 */
+	public void listenForConnection() throws Exception {
+
+		while (!this.finished) {
+			// Listen for connection from another peer.
+			// Once connection started, does whatever in a separate thread.
+			new ProcessConnection(this.listener.accept()).start();
+		}
+	}
+
+	/**
+	 * Thread class to process a connection between this and another peer
+	 */
+	private static class ProcessConnection extends Thread {
+
+		private Socket connection; // the connection the peers are communicating
+									// on
+		private ObjectInputStream in;
+
+		public ProcessConnection(Socket connection) {
+
+			this.connection = connection;
+		}
+
+		public void run() {
+
+			try {
+				this.in = new ObjectInputStream(
+						this.connection.getInputStream());
+				String msg = (String) in.readObject();
+				System.out.println(msg);
+				in.close();
+				connection.close();
+			} catch (Exception e) {
+				// TODO: something ...
+			}
+		}
+
+	}
+
+	/**
+	 * Send a message to another peer TODO: Not just send messages to localhost
+	 * TODO: Send things over just one TCP connection
+	 */
+	public void sendMessage(int port) throws IOException {
+
+		Socket connection = new Socket("localhost", port);
+		ObjectOutputStream out = new ObjectOutputStream(
+				connection.getOutputStream());
+		// write message
+		out.writeObject("Hello World!");
+		out.flush();
+		connection.close();
+	}
 
 }
-
