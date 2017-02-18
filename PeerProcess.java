@@ -10,7 +10,7 @@ public class PeerProcess {
 	private int peerid; // the id of this peer
 	private int listenport; // port number this peer listens on
 	private ServerSocket listener; // socket this peer listens on
-	HashMap<Integer, NeighborPeer> neighbors = new HashMap<Integer, NeighborPeer>();
+	HashMap<Integer, NeighborPeer> neighbors = new HashMap<Integer, NeighborPeer>(); //peerid to peer
 	private Boolean finished = false; // whether the peer sharing process is
 										// finished
 	private static final String commonCfgFileName = "Common.cfg";
@@ -30,12 +30,17 @@ public class PeerProcess {
 	/**
 	 * Main function: Starting point
 	 */		
-	public static void main(String[] args) throws IOException {
+	public static void main(String[] args) throws Exception {
 		int id = Integer.parseInt(args[0]);
 		
 		// Create and initialize this peer's instance
 		PeerProcess p = new PeerProcess(id);
+
+		// Start thread for handshaking each neighbor
+		p.handshakeNeighbors();
 		
+		p.listenForConnection();	
+
 		//TODO: Create thread for other clients trying to make first connection
 		
 		//---------- Commented code to get the code to compile
@@ -115,13 +120,39 @@ public class PeerProcess {
 	 * Constructor for this peer port is the port number this peer will listen
 	 * on TODO: right now, all peers are on localhost, need to change
 	 */
-	public PeerProcess(int id) throws IOException {
+	public PeerProcess(int id) throws Exception {
 		this.peerid = id;
+
+		// Read in config files
 		readCommonCfgFile();
 		readPeerInfoCfgFile();
 
-		System.out.format("Peer: %d Port: %d\n", this.peerid, this.listenport);
+		// Setup listening socket
 		this.listener = new ServerSocket(this.listenport);
+		
+	}
+
+
+	/**
+	 * Start handshake process with each neighbor of lesser peerid
+	 */
+	private void handshakeNeighbors() throws IOException {
+
+		Set<Integer> peerids = this.neighbors.keySet();
+		Iterator i = peerids.iterator();
+
+		// Iterate through neighbors
+		while (i.hasNext()) {
+
+			Integer pid = (Integer) i.next();
+
+			// Contact peers if lower peerid
+			if (pid < this.peerid) {
+				NeighborPeer peer = this.neighbors.get(pid);
+				this.handshakePeer(peer);
+			}
+		}
+
 	}
 
 	/**
@@ -148,26 +179,32 @@ public class PeerProcess {
 			// Loop over all lines in config file
 			while (line != null) {
 				if (!line.startsWith("#")) { // ignore comments
+					split_line = line.split(" ");
 					int id = Integer.parseInt(split_line[0]);
 					String hostname = split_line[1];
 					int port = Integer.parseInt(split_line[2]);
 					boolean hasFile = (split_line[3].equals("1"));
 
-					NeighborPeer nbr = new NeighborPeer(id, port);
-
-					// Add neighboring peers' info to NeighborPeer hash-map
-					this.neighbors.put(id, nbr);
+                                        // Don't add self to neighbors
+					if (id != this.peerid) {
+						NeighborPeer nbr = new NeighborPeer(id, port, hostname);
+						// Add neighboring peers' info to NeighborPeer hash-map
+						this.neighbors.put(id, nbr);
+					}
+                                        else {
+						// Set current peer's port number
+                                        	this.listenport = port;
+                                        }
+                                        
 				}
 
-				// Set current peer's port number
-				this.listenport = (this.neighbors.get(this.peerid)).getPort();
-
 				line = reader.readLine();
-				split_line = line.split(" ");
 			}
 			reader.close();
 
 		} catch (Exception e) {
+			System.out.println("Error reading in peer info file");
+			e.printStackTrace();
 			// TODO: something ...
 		}
 	}
@@ -181,9 +218,9 @@ public class PeerProcess {
 			BufferedReader reader = new BufferedReader(new FileReader(
 					this.commonCfgFileName));
 			String line = reader.readLine();
-			String[] split_line = line.split(" ");
 
 			while (line != null) {
+				String[] split_line = line.split(" ");
 
 				switch (split_line[0]) {
 				case "NumberOfPreferredNeighbors":
@@ -209,12 +246,13 @@ public class PeerProcess {
 				}
 
 				line = reader.readLine();
-				split_line = line.split(" ");
 			}
 
 			reader.close();
 
 		} catch (Exception e) {
+			System.out.println("Error reading in config file");
+			e.printStackTrace();
 			// TODO: something ...
 		}
 
@@ -226,56 +264,137 @@ public class PeerProcess {
 	 */
 	public void listenForConnection() throws Exception {
 
-		while (!this.finished) {
+		while (true) {
 			// Listen for connection from another peer.
+			Socket connection = this.listener.accept();
 			// Once connection started, does whatever in a separate thread.
-			new ProcessConnection(this.listener.accept()).start();
+			new PeerConnection(connection, "LISTEN").start();
 		}
 	}
 
 	/**
-	 * Thread class to process a connection between this and another peer
+	 * Thread class to process a received connection between this and another peer
 	 */
-	private static class ProcessConnection extends Thread {
+	private class PeerConnection extends Thread {
 
 		private Socket connection; // the connection the peers are communicating
 									// on
 		private ObjectInputStream in;
+		private ObjectOutputStream out;
+		private Boolean finished;
 
-		public ProcessConnection(Socket connection) {
+		// The neighbor we are connected with, possibly unknown
+		private NeighborPeer connectedWith = null;
+
+		String type; // Type of connection. For example, "HANDSHAKE"
+
+		public PeerConnection(Socket connection, String type) throws IOException {
 
 			this.connection = connection;
+			this.out = new ObjectOutputStream(this.connection.getOutputStream());
+			out.flush();
+			this.in = new ObjectInputStream(this.connection.getInputStream());
+			this.finished = false;
+			this.type = type;
+
+		}
+
+		public PeerConnection(Socket connection, String type, NeighborPeer connectedWith) throws IOException {
+
+			this(connection, type);
+			this.connectedWith = connectedWith;
 		}
 
 		public void run() {
 
 			try {
-				this.in = new ObjectInputStream(
-						this.connection.getInputStream());
-				String msg = (String) in.readObject();
-				System.out.println(msg);
+
+				// Depending on type of this connection, different things to be done
+				switch (this.type) {
+					case "LISTEN": // Received message, need to read
+						readMessage();
+						break;
+					case "HANDSHAKE": // Send initial handshake message
+						sendHandshake();
+						readMessage(); // Should get handshake response
+						break;
+				}
+
 				in.close();
+				out.close();
 				connection.close();
+
 			} catch (Exception e) {
-				// TODO: something ...
+				System.out.println("There was a problem communicating with a peer.");
+				e.printStackTrace();
 			}
+
 		}
 
+		/**
+		 * Run a handshake connection
+		 * 1. This peer sends initial handshake message
+		 * 2. Wait for other peer to respond
+		 * TODO: Send correct handshake message in bytes
+		 * TODO: Finish actual handshake process ...
+		 */
+		private void sendHandshake() {
+			try {
+				// initial handshake message
+				this.out.writeObject("Handshake from " + peerid); // Not the actual message
+				this.out.flush();
+			}
+			catch (Exception e) {
+				//System.out.println("There was a problem doing a handshake message.");
+				//e.printStackTrace();
+				// TODO: Always getting EOFException ...
+			}
+
+		}
+
+		/**
+		 * Incoming message from this connection, decide what to do.
+		 */
+		private void readMessage() {
+
+			try {
+				// read in message and decide what to do
+				String msg = (String) this.in.readObject();
+				// do something ...
+
+				System.out.println(msg); // TEMPORARY
+
+			} catch (Exception e) {
+				//TODO: EOFException
+				//System.out.println("There was a problem with an incoming message.");
+				//e.printStackTrace();
+			}
+		
+		}
 	}
 
 	/**
-	 * Send a message to another peer TODO: Not just send messages to localhost
-	 * TODO: Send things over just one TCP connection
+	 * Handshake interaction with peer
+	 * Separate thread created for this communication
+	 * TODO: Actually get it to send correct message in bytes
 	 */
-	public void sendMessage(int port) throws IOException {
+	public void handshakePeer(NeighborPeer peer) throws IOException {
 
-		Socket connection = new Socket("localhost", port);
-		ObjectOutputStream out = new ObjectOutputStream(
-				connection.getOutputStream());
-		// write message
-		out.writeObject("Hello World!");
-		out.flush();
-		connection.close();
+		this.peerConnection(peer, "HANDSHAKE");
+	}
+
+	/**
+	 * Start connection with peer, send message
+	 * Separate thread will handle this communication
+	 * type is what sort of connection (for example, handshake)
+	 * msg is what message should initially be sent
+	 */
+	public void peerConnection(NeighborPeer peer, String type) throws IOException {
+
+		Socket connection = new Socket(peer.getHostName(), peer.getPort());
+
+		// separate thread to communicate
+		new PeerConnection(connection, type).start();
 	}
 
 }
