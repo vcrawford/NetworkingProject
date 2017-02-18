@@ -23,11 +23,93 @@ public class PeerProcess {
 	private String FileName;
 	private int FileSize;
 	private int PieceSize;
+	
+	private ArrayList<NeighborPeer> prefNbr; //preferred neighbors
+	private ArrayList<NeighborPeer> waitNbr; //non-preferrend or waiting neighbors 
 
+	/**
+	 * Main function: Starting point
+	 */		
 	public static void main(String[] args) throws IOException {
 		int id = Integer.parseInt(args[0]);
-		PeerProcess peerProcess = new PeerProcess(id);
+		
+		// Create and initialize this peer's instance
+		PeerProcess p = new PeerProcess(id);
+		
+		//TODO: Create thread for other clients trying to make first connection
+		
+		//---------- Commented code to get the code to compile
+//		// Loop till p.finished is false
+//		while (p.finished == false){
+//			
+//			// Loop till preferred and optimistic neighbors stay same
+//			while (true){
+//				Boolean restart_cycle = false; 
+//				
+//				/********* Sending ***********/
+//				// Loop over all preferred neighbors
+//				for (int i = 0; i < p.prefNbr.size(); i++) {
+//					// TODO: Send piece to one neighbor
+//					
+//					// if either preferred or optimistic neighbor has changed,
+//					// then restart the sending and receiving loops
+//					if (p.checkTimeout() == true){
+//						p.updateNbrs();
+//						restart_cycle = true;
+//						break;
+//					}
+//				}
+//				
+//				if (restart_cycle) break;
+//				
+//				/********* Receiving ***********/
+//				// Loop over all preferred neighbors
+//				for (int i = 0; i < p.prefNbr.size(); i++) {
+//					// TODO: Receive piece from one neighbor
+//					// TODO: Write to file
+//					// TODO: Update own bit-field	
+//					
+//					// if either preferred or optimistic neighbor has changed,
+//					// then restart the sending and receiving loops
+//					if (p.checkTimeout() == true){
+//						p.updateNbrs();
+//						restart_cycle = true;
+//						break;
+//					}					
+//				}
+//				
+//				if (restart_cycle) break;				
+//			}
+//		}
+		
+		return;
 	}
+	
+	/**
+	 * Checks if a timeout event has happened
+	 * TODO: implementation
+	 */	
+	public boolean checkTimeout(){
+//		/********* Check for timeouts ***********/
+//		if (UnChokingInterval){
+//			//Update preferred neighbors
+//		}
+//		
+//		if (OptimisticUnchokingInterval){
+//			//Update optimistic neighbors
+//		}
+		
+		return true;
+	}
+	
+	/**
+	 * In case of timeout, updates p.prefNbr and p.waitNbr lists
+	 * TODO: implementation
+	 */	
+	public void updateNbrs(){
+		return;
+	}
+	
 
 	/**
 	 * Constructor for this peer port is the port number this peer will listen
@@ -43,8 +125,7 @@ public class PeerProcess {
 	}
 
 	/**
-	 * Prints neighbor information on screen. 
-	 * Used for debugging purpose only.
+	 * Prints neighbor information on screen. Used for debugging purpose only.
 	 */
 	private void printNeighbors() {
 		for (NeighborPeer nbr : this.neighbors.values()) {
