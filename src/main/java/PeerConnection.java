@@ -1,6 +1,7 @@
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.net.Socket;
 import java.util.concurrent.TimeUnit;
 
@@ -17,10 +18,8 @@ public class PeerConnection extends Thread {
 	private Integer myid; // my ID
 	private Integer peerid; // ID of peer connected to me
 	private Socket connection; // socket
-	private ObjectInputStream in;
-	private ObjectOutputStream out;
 	private Boolean finished;
-
+    
 	// The neighbor we are connected with, possibly unknown
 	private NeighborPeer connectedWith = null;
 
@@ -82,15 +81,6 @@ public class PeerConnection extends Thread {
                 return;
             }
 
-        }
-
-        try {
-            this.out = new ObjectOutputStream(this.connection.getOutputStream());
-            out.flush();
-            this.in = new ObjectInputStream(this.connection.getInputStream());
-        } catch(IOException e) {
-            logger.error("failed creating streams: {}", e);
-            return;
         }
 
 		// Exchange a handshake signal with the peer.
@@ -170,17 +160,19 @@ public class PeerConnection extends Thread {
         logger.info("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
 	}
 
+    private static final String magic = "P2PFILESHARINGPROJ";
 	private void exchangeHandshake(boolean isListener) {
 		/**
 		 * Send a handshake message to the connected peer
 		 */
 		try {
             logger.debug("handshaking {} (self = {})", this.peerid, this.myid);
-			String handshakeStr = "P2PFILESHARINGPROJ" + "\0\0\0\0\0\0\0\0\0\0"
-					+ this.myid;
-			this.out.writeObject(handshakeStr);
-			this.out.flush();
+            ByteBuffer buf = ByteBuffer.allocate(32);
+            buf.put(magic.getBytes());
+            buf.putInt(28, this.myid);
+            this.connection.getOutputStream().write(buf.array());
 		} catch (Exception e) {
+            logger.error("failed to send handshake {}", e);
 			// System.out.println("There was a problem doing a handshake message.");
 			// e.printStackTrace();
 			// TODO: Always getting EOFException ...
@@ -190,11 +182,16 @@ public class PeerConnection extends Thread {
 		 * Wait and receive a handshake message from the connected peer
 		 */
 		try {
-			String handshakeStr = (String) this.in.readObject();
-			String header = handshakeStr.substring(0, 18);
-			// TODO: Check the validity of header
-			this.peerid = Integer.parseInt(handshakeStr.substring(28));
+            ByteBuffer buf = ByteBuffer.allocate(32);
+            this.connection.getInputStream().read(buf.array(), 0, 32);
+            byte[] test_magic = new byte[magic.length()];
+            buf.get(test_magic, 0, magic.length());
+            String test = new String(test_magic);
+            if(!test.equals(magic)) {
+                logger.error("received invalid handshake from {} (magic = {}, self = {})", this.peerid, test, this.myid);
+            }
 
+            this.peerid = buf.getInt(28);
             logger.debug("received handshake from {} (self = {})", this.peerid, this.myid);
 		} catch (Exception e) {
 			// System.out.println("There was a problem doing a handshake message.");
@@ -207,17 +204,5 @@ public class PeerConnection extends Thread {
 	 * Incoming message from this connection, decide what to do.
 	 */
 	private void readMessage() {
-
-		try {
-			// read in message and decide what to do
-			String msg = (String) this.in.readObject();
-			// do something ...
-
-            logger.trace("received message: {}", msg);
-		} catch (Exception e) {
-			// TODO: EOFException
-			// System.out.println("There was a problem with an incoming message.");
-			// e.printStackTrace();
-		}
 	}
 }

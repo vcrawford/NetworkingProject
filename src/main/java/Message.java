@@ -47,7 +47,7 @@ class Message {
         return new Message(t, len, buf);
     }
 
-    public final Payload getPayload() {
+    public Payload getPayload() {
         switch(this.type) {
             case Choke:
             case Unchoke:
