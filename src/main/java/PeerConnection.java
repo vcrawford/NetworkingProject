@@ -20,6 +20,10 @@ public class PeerConnection extends Thread {
 
 	String type; // Type of connection. For example, "HANDSHAKE"
 
+	/* TODO: Add file-pointer variable 
+	 * Since each peer-thread is reading/writing the file independently, each 
+	 * peer-thread must have a separate file-pointer.	*/
+	
 	/**
 	 * Constructor. Is called while creating the thread that will "listen" for a
 	 * connection request from peer
