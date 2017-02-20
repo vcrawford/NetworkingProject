@@ -1,4 +1,4 @@
-# NetworkingProject
+<!-- # NetworkingProject -->
 P2P file sharing similar to BitTorrent
 
 **Step 1:** `cd` to the directory where you've kept your `PeerProcess.java` file.
@@ -11,8 +11,11 @@ This will create `peer_1001` to `peer_1006` directories and put `TheFile.dat` in
 
 **Step 3:** Compile
 
-`javac PeerProcess.java`
+`gradle shadow`
 
 **Step 4:** Run all clients
 
-`start.bat`
+On Windows: `start.bat`
+On *nix: `bash start.sh`
+
+To run independently: `java -Dcolor -jar build/libs/NetworkingProject-all.jar <peer_id>`
