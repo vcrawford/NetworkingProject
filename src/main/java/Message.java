@@ -1,7 +1,9 @@
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
+import java.util.Arrays;
 
 /**
  * Represents the non-handshake messages.
@@ -19,8 +21,12 @@ class Message {
         Request,
         Piece;
 
-        public static Type from(short s) {
+        public static Type from(byte s) {
             return values()[s];
+        }
+
+        public byte asByte() {
+            return (byte)Arrays.asList(values()).indexOf(this);
         }
     };
 
@@ -34,17 +40,45 @@ class Message {
         this.buf = buf;
     }
 
-    public static Message from_steam(InputStream in) throws java.io.IOException {
+    public static Message from_stream(InputStream in) throws java.io.IOException {
         ByteBuffer buf = ByteBuffer.allocate(HEADER_LEN);
         in.read(buf.array(), 0, HEADER_LEN);
 
         int len = buf.getInt();
-        Type t = Type.from(buf.getShort());
+        Type t = Type.from(buf.get());
 
         ByteBuffer payload = ByteBuffer.allocate(len);
         in.read(payload.array(), 0, len);
 
         return new Message(t, len, buf);
+    }
+
+    public void to_stream(OutputStream out) throws java.io.IOException {
+        ByteBuffer buf = ByteBuffer.allocate(HEADER_LEN + this.len);
+        buf.putInt(this.len);
+        buf.put(this.type.asByte());
+        buf.put(this.buf.array());
+
+        out.write(buf.array());
+    }
+
+    public static Message empty(Type t) {
+        return new Message(t, 0, ByteBuffer.allocate(0));
+    }
+
+    public static Message index(Type t, int index) {
+        ByteBuffer buf = ByteBuffer.allocate(4);
+        buf.putInt(index);
+        return new Message(t, 4, buf);
+    }
+
+    public static Message bitfield(BitSet bits) {
+        ByteBuffer buf = ByteBuffer.wrap(bits.toByteArray());
+        return new Message(Type.Bitfield, buf.array().length, buf);
+    }
+
+    public static Message piece(Type t, byte[] contents) {
+        return new Message(t, contents.length, ByteBuffer.wrap(contents));
     }
 
     public Payload getPayload() {

@@ -1,6 +1,8 @@
 import java.net.*; //classes related to sockets
 import java.io.*;
 import java.util.*; //HashMap
+import java.util.BitSet;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +32,10 @@ public class PeerProcess {
 	private String FileName;
 	private int FileSize;
 	private int PieceSize;
+
+    // pieces known
+    public final BitSet pieces;
+    public final ReentrantReadWriteLock pieces_lock;
 
 	// Store nbr IDs
 	private ArrayList<Integer> prefNbr; // preferred neighbors's IDs
@@ -86,6 +92,8 @@ public class PeerProcess {
 	public PeerProcess(int id) throws Exception {
         logger.setLevel(Level.DEBUG);
         logger.info("peer starting (id = {})", id);
+        this.pieces = new BitSet();
+        this.pieces_lock = new ReentrantReadWriteLock();
 		this.myid = id;
 
 		// Read in config files
@@ -233,7 +241,7 @@ public class PeerProcess {
 			// Listen for connection from another peer.
 			Socket connection = this.listener.accept();
 			// Create a separate thread for all future communication w/ this peer
-			new PeerConnection(connection, this.myid).start();
+			new PeerConnection(this, connection, this.myid).start();
 		}
 	}
 
@@ -247,7 +255,7 @@ public class PeerProcess {
         logger.info("connecting to peer (id = {}, self = {})", peer.getID(), this.myid);
 		// Create a separate thread for all future communication w/ this peer
         logger.debug("spinning up connection thead");
-		new PeerConnection(this.myid, peer).start();
+		new PeerConnection(this, this.myid, peer).start();
 	}
 
 }

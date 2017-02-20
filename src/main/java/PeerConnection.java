@@ -19,6 +19,7 @@ public class PeerConnection extends Thread {
 	private Integer peerid; // ID of peer connected to me
 	private Socket connection; // socket
 	private Boolean finished;
+    private final PeerProcess parent;
     
 	// The neighbor we are connected with, possibly unknown
 	private NeighborPeer connectedWith = null;
@@ -33,10 +34,11 @@ public class PeerConnection extends Thread {
 	 * Constructor. Is called while creating the thread that will "send" a
 	 * connection request to peer
 	 */
-	public PeerConnection(Integer myid, NeighborPeer peer)
+	public PeerConnection(PeerProcess parent, Integer myid, NeighborPeer peer)
 			throws IOException {
         this.logger.setLevel(Level.DEBUG);
 
+        this.parent = parent;
 		this.myid = myid;
         this.connectedWith = peer;
         this.peerid = peer.getID();
@@ -47,8 +49,10 @@ public class PeerConnection extends Thread {
 	 * Constructor. Is called while creating the thread that will "listen" for a
 	 * connection request from peer
 	 */
-	public PeerConnection(Socket connection, Integer myid) {
+	public PeerConnection(PeerProcess parent, Socket connection, Integer myid) {
         this.logger.setLevel(Level.DEBUG);
+
+        this.parent = parent;
 		this.connection = connection;
 		this.myid = myid;
 		this.peerid = -1; // Will be set by handshake signal
@@ -88,74 +92,12 @@ public class PeerConnection extends Thread {
 		// peerid of the peer. The handshake signal facilitates that.
 		boolean isListener = (this.peerid == -1);
 		this.exchangeHandshake(isListener);
-
-		// try {
-		//
-		// // Depending on type of this connection, different things to be
-		// // done
-		// switch (this.type) {
-		// case "LISTEN": // Received message, need to read
-		// readMessage();
-		// break;
-		// case "HANDSHAKE": // Send initial handshake message
-		// sendHandshake();
-		// readMessage(); // Should get handshake response
-		// break;
-		// }
-		//
-		// in.close();
-		// out.close();
-		// connection.close();
-		//
-		// } catch (Exception e) {
-		// System.out
-		// .println("There was a problem communicating with a peer.");
-		// e.printStackTrace();
-		// }
-
-		// ---------- Commented code to get the code to compile
-		// // Loop till p.finished is false
-		// while (p.finished == false){
-		//
-		// // Loop till preferred and optimistic neighbors stay same
-		// while (true){
-		// Boolean restart_cycle = false;
-		//
-		// /********* Sending ***********/
-		// // Loop over all preferred neighbors
-		// for (int i = 0; i < p.prefNbr.size(); i++) {
-		// // TODO: Send piece to one neighbor
-		//
-		// // if either preferred or optimistic neighbor has changed,
-		// // then restart the sending and receiving loops
-		// if (p.checkTimeout() == true){
-		// p.updateNbrs();
-		// restart_cycle = true;
-		// break;
-		// }
-		// }
-		//
-		// if (restart_cycle) break;
-		//
-		// /********* Receiving ***********/
-		// // Loop over all preferred neighbors
-		// for (int i = 0; i < p.prefNbr.size(); i++) {
-		// // TODO: Receive piece from one neighbor
-		// // TODO: Write to file
-		// // TODO: Update own bit-field
-		//
-		// // if either preferred or optimistic neighbor has changed,
-		// // then restart the sending and receiving loops
-		// if (p.checkTimeout() == true){
-		// p.updateNbrs();
-		// restart_cycle = true;
-		// break;
-		// }
-		// }
-		//
-		// if (restart_cycle) break;
-		// }
-		// }
+        try {
+            Message next = this.exchangeBitfield();
+            this.notifyInterested();
+        } catch(IOException e) {
+            return;
+        }
 
         logger.info("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
 	}
@@ -192,6 +134,7 @@ public class PeerConnection extends Thread {
             }
 
             this.peerid = buf.getInt(28);
+            this.connectedWith = new NeighborPeer(this.peerid, this.connection.getPort(), this.connection.getInetAddress().getHostName());
             logger.debug("received handshake from {} (self = {})", this.peerid, this.myid);
 		} catch (Exception e) {
 			// System.out.println("There was a problem doing a handshake message.");
@@ -199,6 +142,55 @@ public class PeerConnection extends Thread {
 			// TODO: Always getting EOFException ...
 		}
 	}
+
+    // Returns either the next message or null if the peer sent a
+    // bitfield message.
+    private Message exchangeBitfield() throws IOException {
+        try {
+            logger.debug("acquiring pieces read lock");
+            parent.pieces_lock.readLock().lock();
+            logger.info("sending bitfield to {}", this.peerid);
+            Message.bitfield(parent.pieces).to_stream(this.connection.getOutputStream());
+
+            Message response = Message.from_stream(this.connection.getInputStream());
+            if(response.type == Message.Type.Bitfield) {
+                logger.info("received bitfield response from {}", this.peerid);
+                this.connectedWith.addPieces(((Message.BitfieldPayload)response.getPayload()).bitfield);
+                return null;
+            } else {
+                logger.info("received other response from {} (actual type: {})", this.peerid, response.type);
+                return response;
+            }
+
+        } catch(IOException e) {
+            logger.error("failed to exchange bitfield with {}: {}", this.peerid, e);
+            throw e;
+        } finally {
+            logger.debug("releasing pieces read lock");
+            parent.pieces_lock.readLock().unlock();
+        }
+    }
+
+    private void notifyInterested() throws IOException {
+        try {
+            logger.debug("acquiring pieces read lock");
+            parent.pieces_lock.readLock().lock();
+
+            if(this.connectedWith.interested(this.parent.pieces)) {
+                logger.info("sending interested message to {}", this.peerid);
+                Message.empty(Message.Type.Interested).to_stream(this.connection.getOutputStream());
+            } else {
+                logger.info("sending not-interested message to {}", this.peerid);
+                Message.empty(Message.Type.NotInterested).to_stream(this.connection.getOutputStream());
+            }
+        } catch(IOException e) {
+            logger.error("failed to notify {} of interest: {}", this.peerid, e);
+            throw e;
+        } finally {
+            logger.debug("releasing pieces read lock");
+            parent.pieces_lock.readLock().unlock();
+        }
+    }
 
 	/**
 	 * Incoming message from this connection, decide what to do.
