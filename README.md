@@ -16,6 +16,7 @@ This will create `peer_1001` to `peer_1006` directories and put `TheFile.dat` in
 **Step 4:** Run all clients
 
 On Windows: `start.bat`
+
 On *nix: `bash start.sh`
 
 To run independently: `java -Dcolor -jar build/libs/NetworkingProject-all.jar <peer_id>`
