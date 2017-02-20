@@ -58,7 +58,8 @@ public class PeerConnection extends Thread {
 
 	public void run() {
         logger.info("new connection (peer = {}, self = {})", this.peerid, this.myid);
-        while(this.connection == null) {
+        // create the socket if it doesn't exist
+        while(this.connection == null && this.connectedWith != null) {
             String hostname = this.connectedWith.getHostName();
             int port = this.connectedWith.getPort();
             logger.debug("creating socket ({}:{})", hostname, port);
