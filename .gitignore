@@ -23,3 +23,6 @@ hs_err_pid*
 
 # Ignore directories
 peer_*/
+
+build/
+.gradle/

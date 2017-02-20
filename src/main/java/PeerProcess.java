@@ -2,10 +2,15 @@ import java.net.*; //classes related to sockets
 import java.io.*;
 import java.util.*; //HashMap
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ch.qos.logback.classic.Level;
+
 /**
  * Represents the peer that is running on this process
  */
 public class PeerProcess {
+    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("project.networking");
 
 	private int myid; // the id of this peer
 	private int listenport; // port number this peer listens on
@@ -34,8 +39,9 @@ public class PeerProcess {
 	 * Main function: Starting point
 	 */
 	public static void main(String[] args) throws Exception {
+        logger.setLevel(Level.DEBUG);
 		int id = Integer.parseInt(args[0]);
-		System.out.format("%d started\n", id); System.out.flush();
+        logger.info("peer starting (id = {})", id);
 		
 		// Create and initialize this peer's instance
 		PeerProcess p = new PeerProcess(id);
