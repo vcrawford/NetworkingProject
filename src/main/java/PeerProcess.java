@@ -39,9 +39,7 @@ public class PeerProcess {
 	 * Main function: Starting point
 	 */
 	public static void main(String[] args) throws Exception {
-        logger.setLevel(Level.DEBUG);
 		int id = Integer.parseInt(args[0]);
-        logger.info("peer starting (id = {})", id);
 		
 		// Create and initialize this peer's instance
 		PeerProcess p = new PeerProcess(id);
@@ -86,6 +84,8 @@ public class PeerProcess {
 	 * Constructor for peer process
 	 */
 	public PeerProcess(int id) throws Exception {
+        logger.setLevel(Level.DEBUG);
+        logger.info("peer starting (id = {})", id);
 		this.myid = id;
 
 		// Read in config files
@@ -100,6 +100,7 @@ public class PeerProcess {
 	 * Start handshake process with each neighbor with ID < myid
 	 */
 	private void handshakeNeighbors() throws IOException {
+        logger.info("connecting to peers with lower ids");
 
 		Set<Integer> peerids = this.neighbors.keySet();
 		Iterator i = peerids.iterator();
@@ -115,6 +116,7 @@ public class PeerProcess {
 				this.peerConnection(peer);
 			}
 		}
+        logger.info("done connecting to peers");
 	}
 
 	/**
@@ -130,6 +132,7 @@ public class PeerProcess {
 	 * Read in variables from config file, set all appropriate variables
 	 */
 	public void readPeerInfoCfgFile() {
+        logger.debug("reading peer config");
 		try {
 			BufferedReader reader = new BufferedReader(new FileReader(
 					this.peerInfoFileName));
@@ -161,16 +164,18 @@ public class PeerProcess {
 			reader.close();
 
 		} catch (Exception e) {
-			System.out.println("Error reading in peer info file");
+            logger.error("Error reading peer info file");
 			e.printStackTrace();
-			// TODO: something ...
+            System.exit(-1);
 		}
+        logger.debug("done reading peer config");
 	}
 
 	/**
 	 * Read in variables from config file, set all appropriate variables
 	 */
 	private void readCommonCfgFile() {
+        logger.debug("reading common config");
 
 		try {
 			BufferedReader reader = new BufferedReader(new FileReader(
@@ -209,11 +214,12 @@ public class PeerProcess {
 			reader.close();
 
 		} catch (Exception e) {
-			System.out.println("Error reading in config file");
+            logger.error("Error reading common file");
 			e.printStackTrace();
-			// TODO: something ...
+            System.exit(-1);
 		}
 
+        logger.debug("done reading common config");
 	}
 
 	/**
@@ -238,14 +244,10 @@ public class PeerProcess {
 	 */
 	public void peerConnection(NeighborPeer peer)
 			throws IOException {
-		String hostname = peer.getHostName();
-		Integer port = peer.getPort();
-
-		//Create a socket to communicate with this peer
-		Socket connection = new Socket(hostname, port);
-
+        logger.info("connecting to peer (id = {}, self = {})", peer.getID(), this.myid);
 		// Create a separate thread for all future communication w/ this peer
-		new PeerConnection(connection, this.myid, peer.getID()).start();
+        logger.debug("spinning up connection thead");
+		new PeerConnection(this.myid, peer).start();
 	}
 
 }

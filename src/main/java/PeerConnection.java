@@ -2,11 +2,17 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ch.qos.logback.classic.Level;
 
 /**
  * Thread class to process a received connection between me and a peer
  */
 public class PeerConnection extends Thread {
+    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("project.networking.connection");
 
 	private Integer myid; // my ID
 	private Integer peerid; // ID of peer connected to me
@@ -25,56 +31,66 @@ public class PeerConnection extends Thread {
 	 * peer-thread must have a separate file-pointer.	*/
 	
 	/**
-	 * Constructor. Is called while creating the thread that will "listen" for a
-	 * connection request from peer
+	 * Constructor. Is called while creating the thread that will "send" a
+	 * connection request to peer
 	 */
-	public PeerConnection(Socket connection, Integer myid) throws IOException {
+	public PeerConnection(Integer myid, NeighborPeer peer)
+			throws IOException {
+        this.logger.setLevel(Level.DEBUG);
 
-		this.connection = connection;
 		this.myid = myid;
-		this.peerid = -1; // Will be set by handshake signal
-		this.out = new ObjectOutputStream(this.connection.getOutputStream());
-		out.flush();
-		this.in = new ObjectInputStream(this.connection.getInputStream());
+        this.connectedWith = peer;
+        this.peerid = peer.getID();
 		this.finished = false;
 	}
 
 	/**
-	 * Constructor. Is called while creating the thread that will "send" a
-	 * connection request to peer
+	 * Constructor. Is called while creating the thread that will "listen" for a
+	 * connection request from peer
 	 */
-	public PeerConnection(Socket connection, Integer myid, Integer peerid)
-			throws IOException {
-
+	public PeerConnection(Socket connection, Integer myid) {
+        this.logger.setLevel(Level.DEBUG);
 		this.connection = connection;
 		this.myid = myid;
-		this.peerid = peerid; // Will be set by handshake signal
-		this.out = new ObjectOutputStream(this.connection.getOutputStream());
-		out.flush();
-		this.in = new ObjectInputStream(this.connection.getInputStream());
+		this.peerid = -1; // Will be set by handshake signal
 		this.finished = false;
-	}
-
-	public PeerConnection(Socket connection, String type) throws IOException {
-
-		this.connection = connection;
-		this.out = new ObjectOutputStream(this.connection.getOutputStream());
-		out.flush();
-		this.in = new ObjectInputStream(this.connection.getInputStream());
-		this.finished = false;
-		this.type = type;
-	}
-
-	public PeerConnection(Socket connection, String type,
-			NeighborPeer connectedWith) throws IOException {
-
-		this(connection, type);
-		this.connectedWith = connectedWith;
 	}
 
 	public void run() {
-		System.out.format("%d th: %d Up\n", this.myid, this.peerid);
-		System.out.flush();
+        logger.info("new connection (peer = {}, self = {})", this.peerid, this.myid);
+        while(this.connection == null) {
+            String hostname = this.connectedWith.getHostName();
+            int port = this.connectedWith.getPort();
+            logger.debug("creating socket ({}:{})", hostname, port);
+            try {
+                this.connection = new Socket(hostname, port);
+            } catch(java.net.ConnectException _e) {
+                logger.debug("failed to create socket ({}:{}). retrying in 5s", hostname, port);
+                try {
+                    TimeUnit.SECONDS.sleep(5);
+                } catch(Exception e) {
+                    logger.error("failed to create socket ({}:{})", hostname, port);
+                    e.printStackTrace();
+                    return;
+                }
+            } catch(java.net.UnknownHostException _e) {
+                logger.error("failed to find host {}", hostname);
+                return;
+            } catch(IOException e) {
+                logger.error("socket creation failed with IOException: {}", e);
+                return;
+            }
+
+        }
+
+        try {
+            this.out = new ObjectOutputStream(this.connection.getOutputStream());
+            out.flush();
+            this.in = new ObjectInputStream(this.connection.getInputStream());
+        } catch(IOException e) {
+            logger.error("failed creating streams: {}", e);
+            return;
+        }
 
 		// Exchange a handshake signal with the peer.
 		// If I was a listener then , till now this thread doesn't know the
@@ -150,8 +166,7 @@ public class PeerConnection extends Thread {
 		// }
 		// }
 
-		System.out.format("%d th: %d Exiting\n", this.myid, this.peerid);
-		System.out.flush();
+        logger.info("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
 	}
 
 	private void exchangeHandshake(boolean isListener) {
@@ -159,6 +174,7 @@ public class PeerConnection extends Thread {
 		 * Send a handshake message to the connected peer
 		 */
 		try {
+            logger.debug("handshaking {} (self = {})", this.peerid, this.myid);
 			String handshakeStr = "P2PFILESHARINGPROJ" + "\0\0\0\0\0\0\0\0\0\0"
 					+ this.myid;
 			this.out.writeObject(handshakeStr);
@@ -178,8 +194,7 @@ public class PeerConnection extends Thread {
 			// TODO: Check the validity of header
 			this.peerid = Integer.parseInt(handshakeStr.substring(28));
 
-			System.out.format("%d rcvd header: %s from %d\n", this.myid,
-					header, this.peerid);
+            logger.debug("received handshake from {} (self = {})", this.peerid, this.myid);
 		} catch (Exception e) {
 			// System.out.println("There was a problem doing a handshake message.");
 			// e.printStackTrace();
@@ -197,8 +212,7 @@ public class PeerConnection extends Thread {
 			String msg = (String) this.in.readObject();
 			// do something ...
 
-			System.out.println(msg); // TEMPORARY
-
+            logger.trace("received message: {}", msg);
 		} catch (Exception e) {
 			// TODO: EOFException
 			// System.out.println("There was a problem with an incoming message.");

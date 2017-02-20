@@ -8,7 +8,6 @@ public class NeighborPeer{
    private String hostName;
 
    public NeighborPeer(int id, int port, String host) {
-
       this.peerid = id;
       this.port = port;
       this.hostName = host;
