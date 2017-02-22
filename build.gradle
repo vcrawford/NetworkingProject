@@ -21,6 +21,21 @@ dependencies {
 
 sourceCompatibility = 1.8
 
+// they say no directories
+sourceSets {
+    main {
+        java {
+            srcDirs = ['.']
+            exclude 'build'
+        }
+        resources {
+            srcDirs = ['.']
+            exclude 'build'
+        }
+    }
+}
+
+
 jar {
     manifest {
         attributes 'Main-Class': 'PeerProcess'
