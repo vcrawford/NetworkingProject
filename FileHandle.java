@@ -1,46 +1,109 @@
+import java.util.BitSet;
+import java.util.HashMap;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+
 /**
  * Class to serve as an interface to all file related tasks
  */
 public class FileHandle{
-	private String FileName;
-	private int FileSize;
-	private int PieceSize;
+	private Integer myid;
+	private String fileName;
+	private int fileSize;
+	private int pieceSize;
+	BitSet myBitField;
+	HashMap<Integer, BitSet> peerBitFields;
+	// One of fin or fout will be NULL and won't be used during lifetime of process
+	InputStream fin;
+	OutputStream fout;
 	
 	/**
 	 * Constructor.
 	 */	
-	public FileHandle(boolean haveFile){
-		//TODO: Initialize these variable with correct values
-		this.FileName = "";
-		this.FileSize = 0;
-		this.PieceSize = 0;
+	public FileHandle(
+			Integer myid,
+			boolean haveFile, 
+			String fileName, 
+			Integer fileSize,
+			Integer pieceSize){
+		this.myid = myid;
+		this.fileName = fileName;
+		this.fileSize = fileSize;
+		this.pieceSize = pieceSize;
 		
+		// Set bit-field. All bits should be True or False
+		Integer numPieces = (Integer) this.fileSize/this.pieceSize;
+		this.myBitField = new BitSet(numPieces);
+		this.myBitField.set(0, numPieces, haveFile);
+		
+		// Open TheFile.dat
+		String fileNameWithPath = "peer_" + this.myid.toString()
+				+ File.separatorChar + this.fileName;
 		if (haveFile){
-			//TODO: Open TheFile.dat file here, if supposed to be available
-			//TODO: Compute bitfield. All bits should be 1.
+			// Open existing file
+			try {
+				InputStream fin = new FileInputStream(fileNameWithPath);
+			} catch (FileNotFoundException e) {; 
+				System.out.format("Unable to open: ", fileNameWithPath);
+				e.printStackTrace();
+			}
 		}
 		else{
-			//TODO: Compute bitfield. All bits should be 0.			
+			// Create TheFile.dat file
+			try {
+				OutputStream fout = new FileOutputStream(fileNameWithPath);
+			} catch (FileNotFoundException e) {; 
+				System.out.format("Unable to open: ", fileNameWithPath);
+				e.printStackTrace();
+			}
 		}
 		
 		//TODO: Data structure to lock a piece that a peer-thread is receiving
 		// We don't want more than one thread receiving/requesting same piece
+		
 	}
 	
 	/**
-	 * Peer-thread calls this function and used the returned bitfield to send 
-	 * to connected peer/s
+	 * Peer-thread calls this function and use the returned bit-field (which 
+	 * represents my available pieces) to send to connected peer/s
 	 */		
-	public void getBitfield(){
-		//TODO: returns current status of bitfield
+	public BitSet getBitfield(){
+		return this.myBitField;
 	}
 	
 	/**
-	 * Is called by peer-thread to determine if I am intrested in a peer whose
-	 * bitfield is given as argument
+	 * Peer-thread calls this function. Whenever I receive a piece from peer, I
+	 * update my own bit-field with this newly received piece
 	 */		
-	public boolean checkInterest(/* bitfield*/){
-		//TODO: Check if I am interested in a peer
+	public void updateBitfield(Integer pieceIndex){
+		// Set the bit at pieceIndex to True
+		//TODO: lock the file handle
+		this.myBitField.set(pieceIndex);
+		//TODO: unlock the file handle
+	}	
+	
+	/**
+	 * Peer-thread calls this function. I am supposed to have bit-fields of each 
+	 * peer I am connected to. Whenever Peer-thread receives a complete  
+	 * bit-field from peer, it calls this function to store peer's bitfield.
+	 * This would be called only once, right after receiving the bit-field from 
+	 * peer.
+	 */		
+	public void setBitfield(Integer peerid, BitSet peerBitField){
+		//Store peer's bit-field
+		this.peerBitFields.put(peerid, peerBitField);
+	}
+	
+	/**
+	 * Is called by peer-thread to determine if I am interested in a peer whose
+	 * bit-field is given as argument
+	 */		
+	public boolean checkInterest(Integer peerid){
+		//
 		return true;
 	}	
 	
@@ -72,4 +135,15 @@ public class FileHandle{
 		return /*, data structure for piece*/;
 	}	
 	
+	
+	/**
+	 * Is called by the peer-thread. Returns an array of scores of all connected
+	 * peers. This score is used to determine Preferred neighbors in case of 
+	 * Unchoking Interval timeout. Higer score represents higher bandwidth. 
+	 */		
+	public void getBandwidthScore(Integer peerid ){
+		//TODO: implementation
+		
+		return /* array of bandwidth scores */;
+	}	
 }
