@@ -1,36 +1,49 @@
 import java.util.BitSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.util.Random;
 
 /**
  * Class to serve as an interface to all file related tasks
  */
 public class FileHandle{
 	private Integer myid;
+	private boolean haveFile;
 	private String fileName;
-	private int fileSize;
-	private int pieceSize;
+	private Integer fileSize;
+	private Integer pieceSize;
 	BitSet myBitField;
 	HashMap<Integer, BitSet> peerBitFields;
-	// One of fin or fout will be NULL and won't be used during lifetime of process
-	InputStream fin;
-	OutputStream fout;
+	HashSet<Integer> idxBeingRequested;
+	RandomAccessFile f;
+	Random rand;
+	HashMap<Integer, Double>bwScores;
+	
+	// Data structure to apply a lock before self-inquiring which piece to
+	// request. We don't want more than one thread requesting same piece	
+	Object lock;
 	
 	/**
-	 * Constructor.
-	 */	
+	 * Constructor
+	 * @param myid: my ID
+	 * @param haveFile: A boolean if I have the complete file when process starts
+	 * @param fileName: The data file without path.
+	 * @param fileSize
+	 * @param pieceSize
+	 */
 	public FileHandle(
 			Integer myid,
 			boolean haveFile, 
 			String fileName, 
 			Integer fileSize,
 			Integer pieceSize){
+		
 		this.myid = myid;
+		this.haveFile = haveFile;
 		this.fileName = fileName;
 		this.fileSize = fileSize;
 		this.pieceSize = pieceSize;
@@ -40,31 +53,27 @@ public class FileHandle{
 		this.myBitField = new BitSet(numPieces);
 		this.myBitField.set(0, numPieces, haveFile);
 		
-		// Open TheFile.dat
+		// Random object to generate random index to be requested
+		this.rand = new Random(1337);
+		
+		/* Open TheFile.dat */
 		String fileNameWithPath = "peer_" + this.myid.toString()
 				+ File.separatorChar + this.fileName;
-		if (haveFile){
-			// Open existing file
+		try {
+			f = new RandomAccessFile(fileNameWithPath, "rw");
+		} catch (FileNotFoundException e) {
+			System.out.format("Unable to open: ", fileNameWithPath);
+			e.printStackTrace();
+		}
+		// Allocate on disk to enable random seeks
+		if (haveFile == false){
 			try {
-				InputStream fin = new FileInputStream(fileNameWithPath);
-			} catch (FileNotFoundException e) {; 
-				System.out.format("Unable to open: ", fileNameWithPath);
+				f.setLength(this.fileSize);
+			} catch (IOException e) {
+				System.out.format("Unable to allocate %d bytes memory", this.fileSize);
 				e.printStackTrace();
 			}
 		}
-		else{
-			// Create TheFile.dat file
-			try {
-				OutputStream fout = new FileOutputStream(fileNameWithPath);
-			} catch (FileNotFoundException e) {; 
-				System.out.format("Unable to open: ", fileNameWithPath);
-				e.printStackTrace();
-			}
-		}
-		
-		//TODO: Data structure to lock a piece that a peer-thread is receiving
-		// We don't want more than one thread receiving/requesting same piece
-		
 	}
 	
 	/**
@@ -81,21 +90,25 @@ public class FileHandle{
 	 */		
 	public void updateBitfield(Integer pieceIndex){
 		// Set the bit at pieceIndex to True
-		//TODO: lock the file handle
+		//lock the file handle
+		synchronized (lock){
 		this.myBitField.set(pieceIndex);
-		//TODO: unlock the file handle
-	}	
+		}
+	}
 	
 	/**
 	 * Peer-thread calls this function. I am supposed to have bit-fields of each 
 	 * peer I am connected to. Whenever Peer-thread receives a complete  
-	 * bit-field from peer, it calls this function to store peer's bitfield.
+	 * bit-field from peer, it calls this function to store peer's bit-field.
 	 * This would be called only once, right after receiving the bit-field from 
 	 * peer.
 	 */		
 	public void setBitfield(Integer peerid, BitSet peerBitField){
 		//Store peer's bit-field
 		this.peerBitFields.put(peerid, peerBitField);
+		
+		// TODO: Put proper bandwidth score
+		this.bwScores.put(peerid, 0.0);
 	}
 	
 	/**
@@ -103,47 +116,133 @@ public class FileHandle{
 	 * bit-field is given as argument
 	 */		
 	public boolean checkInterest(Integer peerid){
-		//
+		// TODO: implementation
 		return true;
 	}	
 	
 	/**
-	 * Peer-thread calls this function with peer's bitfield as a parameter.
-	 * Function returns a piece-index that will be requested by Peer-thread 
+	 * Peer-thread calls this function.
+	 * Function returns a piece-index that will be Peer-thread will request 
 	 * from connected peer
 	 */		
-	public void getPieceIndexToReceive(/*bit-field from peer */){
+	public Integer getPieceIndexToReceive(){
 		/* Based on bit-field of peer, randomly returns a piece-index that
 		 * the peer-thread has to request from connected peer */
+		// In case the full file have been received, return -1 directly
+		Integer pieceIdx = -1;
+
+		synchronized(lock){
+			/* get a random pieceIdx from myBitField that is not yet received 
+			 * also that is not present in idxBeingRequested */
+			Double temp = Math.ceil(((double)this.fileSize)/this.pieceSize);
+			Integer numPieces = temp.intValue();
+			
+			while (this.haveFile == false){
+				Integer randIdx = this.rand.nextInt(numPieces);
+				
+				// First check if this piece-index is already received
+				if (this.myBitField.get(randIdx) == true)
+					continue;
+				
+				// Then check if it is already being requested
+				if (this.idxBeingRequested.contains(randIdx) == false){
+					pieceIdx = randIdx;
+					break;
+				}
+			}
+			
+			if (pieceIdx != -1){
+				// Note down that this pieceIdx is being requested from this peerid
+				// This is to make sure that no other peers are requested this piece
+				this.idxBeingRequested.add(pieceIdx);
+			}
+		}
+		
+		return pieceIdx;
 	}
+	
+	/**
+	 * This function is called in case the requested pieceIdx wasn't received 
+	 * because of timeout on the other peer's side. In such case remove the 
+	 * pieceIdx from the idxBeingRequested.
+	 * Now, any connected peer may get asked for this pieceIdx
+	 * @param peerid
+	 * @param pieceIdx
+	 */
+	public void cancelPieceIndexRequest(Integer pieceIdx){
+		this.idxBeingRequested.add(pieceIdx);
+	}	
 	
 	/**
 	 * After receiving a piece from peer, the peer thread calls this function
 	 * to write the acquired piece into disk
-	 */		
-	public void writePiece(Integer pieceIndex /*, data structure for piece*/){
-		
+	 * @param pieceIdx
+	 * @param piece Byte-array holding piece inside it
+	 * @param pieceLen Length of piece. For the last pieceIdx this parameter 
+	 * should specify the length of valid bytes inside piece  
+	 */
+	public void writePiece(Integer pieceIdx, byte[] piece, Integer pieceLen){
+		try {
+			f.write(piece, pieceIdx * this.pieceSize, pieceLen);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	/**
-	 * Is called by the peer-thread. Returns piece based on the pieceIndex
-	 * parameter. The peer-thread then sends the piece to connected peer.
-	 */		
-	public void getPieceToSend(Integer pieceIndex ){
-		//TODO: Return the piece corresponding to pieceIndex
+	 * Is called by the peer-thread. 
+	 * @param pieceIndex
+	 * @param piece A byte-array. Must be allocated by the caller
+	 * @param maxPieceLen Size of byte-array
+	 * @return Length of piece that was read from file. In case of last-piece 
+	 * of file, the length may be lesser than maxPieceLen.
+	 */
+	public Integer getPieceToSend(Integer pieceIndex, byte[] piece, Integer maxPieceLen){
+		Integer pieceLen = 0;
 		
-		return /*, data structure for piece*/;
+		try {
+			pieceLen = f.read(piece, pieceIndex * this.pieceSize, maxPieceLen);
+		} catch (IndexOutOfBoundsException e) {
+			/* Only able to read few bytes because this piecce was located 
+			 * near EOF. Data in piece is still valid */
+			return pieceLen;
+		}
+		catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+		return pieceLen;
 	}	
-	
-	
+
 	/**
 	 * Is called by the peer-thread. Returns an array of scores of all connected
 	 * peers. This score is used to determine Preferred neighbors in case of 
-	 * Unchoking Interval timeout. Higer score represents higher bandwidth. 
-	 */		
-	public void getBandwidthScore(Integer peerid ){
-		//TODO: implementation
+	 * Unchoking Interval timeout. Higher score represents higher bandwidth. 
+	 * @param k Number of preferred neighbors
+	 * @return Integer array of k peer IDs
+	 */
+	public Integer [] getPreferredNbrs(Integer k){
+		/* TODO: Populate array by bwScore values. Currently just sending the
+		 * first neighbors in the hashmap
+		 */
+		Integer numPeers = this.bwScores.size();
+		Integer [] ids = new Integer[k];
+		Integer id_counter = 0;
 		
-		return /* array of bandwidth scores */;
+		for ( Integer id : this.bwScores.keySet() ) {
+			ids[id_counter] = id;
+			id_counter++;
+			if (id_counter == k)
+				break;
+		}
+		
+		/* Towards the start, when numbers of peers that are connected are 
+		 * lesser than k, fill rest of the peer ids as -1. Caller should take 
+		 * care of this */ 
+		for (Integer i = numPeers; i < k; i++){
+			ids[i] = -1;
+		}
+				
+		return ids;
 	}	
 }
