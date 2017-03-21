@@ -1,4 +1,12 @@
 <configuration>
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+	<file>log_peer_${peerid}.log</file>
+	<append>false</append>
+	<immediateFlush>true</immediateFlush>
+	<encoder>
+            <pattern>[%date] [%level] [%logger{10} %file:%line] %msg%n</pattern>
+	</encoder>
+   </appender>
     <appender name="COLOR" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>[%date] %highlight([%level]) [%logger{10} %file:%line] %msg%n</pattern>
@@ -18,5 +26,12 @@
                     <appender-ref ref="NOCOLOR"/>
             </else>
         </if>
+	<if condition='isDefined("peerid")'>
+	    <then>
+		<appender-ref ref="FILE"/>
+	    </then>
+	    <else>
+	    </else>
+	</if>
     </root>
 </configuration>
