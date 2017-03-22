@@ -25,7 +25,7 @@ public class PeerConnection extends Thread {
     // The neighbor we are connected with, possibly unknown
     private NeighborPeer connectedWith = null;
 
-    private static final String magic = "P2PFILESHARINGPROJ";
+    private static final String handshake_header = "P2PFILESHARINGPROJ";
 
     /* TODO: Add file-pointer variable 
      * Since each peer-thread is reading/writing the file independently, each 
@@ -133,7 +133,7 @@ public class PeerConnection extends Thread {
 
 	    // Send handshake bytes
             ByteBuffer buf = ByteBuffer.allocate(32);
-            buf.put(magic.getBytes());
+            buf.put(handshake_header.getBytes());
             buf.putInt(28, this.myid);
             this.connection.getOutputStream().write(buf.array());
 	} catch (Exception e) {
@@ -148,13 +148,13 @@ public class PeerConnection extends Thread {
             this.connection.getInputStream().read(buf.array(), 0, 32);
 
 	    // Test whether it is in fact a handshake message
-            byte[] test_magic = new byte[magic.length()];
-            buf.get(test_magic, 0, magic.length());
-            String test = new String(test_magic);
+            byte[] test_handshake_header = new byte[handshake_header.length()];
+            buf.get(test_handshake_header, 0, handshake_header.length());
+            String test = new String(test_handshake_header);
 
-            if(!test.equals(magic)) {
+            if(!test.equals(handshake_header)) {
 		// Was not the handshake message
-                logger.error("received invalid handshake from {} (magic = {}, self = {})",
+                logger.error("received invalid handshake from {} (handshake_header = {}, self = {})",
 		    this.peerid, test, this.myid);
             }
 
