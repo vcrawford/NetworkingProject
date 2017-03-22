@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.net.Socket;
 import java.util.concurrent.TimeUnit;
+import java.util.BitSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -180,8 +181,13 @@ public class PeerConnection extends Thread {
         try {
             logger.debug("acquiring pieces read lock");
             parent.pieces_lock.readLock().lock();
-            logger.info("sending bitfield to {}", this.peerid);
-            Message.bitfield(parent.pieces).to_stream(this.connection.getOutputStream());
+
+            // Form bitfield message
+            Message my_bits_msg = Message.bitfield(parent.pieces);
+            logger.info("sending bitfield {} to {}", parent.pieces, this.peerid);
+
+            // Send bitfield message
+            my_bits_msg.to_stream(this.connection.getOutputStream());
 
         } catch(IOException e) {
             logger.error("failed to send bitfield to {}: {}", this.peerid, e);
@@ -202,11 +208,13 @@ public class PeerConnection extends Thread {
 	    // Check if bitfield message
             if(response.type == Message.Type.Bitfield) {
 
-		// Is bitfield
-                logger.info("received bitfield response from {}", this.peerid);
+                // Is bitfield, so get bits
+                BitSet peer_bits = ((Message.BitfieldPayload)response.getPayload()).bitfield;
+                logger.debug("received bitfield response {} from {}", peer_bits.toString(),
+                    this.peerid);
 
 		// Record what pieces this neighbor has
-                this.connectedWith.addPieces(((Message.BitfieldPayload)response.getPayload()).bitfield);
+                this.connectedWith.addPieces(peer_bits);
 
             } else {
                 logger.info("failed to receive bitfield from {} (actual type: {})",

@@ -34,6 +34,7 @@ public class PeerProcess {
     private int FileSize;
     private int PieceSize;
 
+    private int hasFile; // whether we start with the file or not
     // pieces of file that we have
     public final BitSet pieces;
     public final ReentrantReadWriteLock pieces_lock;
@@ -72,9 +73,7 @@ public class PeerProcess {
 	logger.setLevel(Level.DEBUG);
 	logger.info("peer starting (id = {})", id);
 
-	// Bits for pieces, all initially set to false
-	// If we do have the file, should be set when reading in peer file
-	this.pieces = new BitSet();
+        // BitSet lock. BitSet will be set after reading in config files
 	this.pieces_lock = new ReentrantReadWriteLock();
 
 	// peer id
@@ -83,6 +82,20 @@ public class PeerProcess {
 	// Read in config files
 	readCommonCfgFile();
 	readPeerInfoCfgFile();
+
+        // BitSet
+        int num_bits = this.FileSize/this.PieceSize;
+        this.pieces = new BitSet(num_bits);
+
+        // Fill pieces depending on whether we have the file or not
+        if (this.hasFile == 1) {
+            // Set all pieces to one
+            for (int i=0; i < num_bits; ++i) {
+                this.pieces.flip(i);
+            }        
+        }
+
+        logger.debug("BitSet of {} set to {}", this.myid, this.pieces.toString());
 
 	// Set up listening socket
 	this.listener = new ServerSocket(this.listenport);
@@ -162,7 +175,6 @@ public class PeerProcess {
 		    int id = Integer.parseInt(split_line[0]);
 		    String hostname = split_line[1];
 		    int port = Integer.parseInt(split_line[2]);
-		    boolean hasFile = (split_line[3].equals("1"));
 
 		    // Don't add self to neighbors
 		    if (id != this.myid) {
@@ -172,6 +184,8 @@ public class PeerProcess {
 		    } else {
 			// Set current peer's port number
 			this.listenport = port;
+                        // Whether it has the file or not
+		        this.hasFile = Integer.parseInt(split_line[3]);
 		    }
 		}
 

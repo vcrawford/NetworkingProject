@@ -35,15 +35,15 @@ class Message {
         }
     };
 
-    public final Type type;
-    private final int len;
-    // Is this only the payload?
-    private final ByteBuffer buf;
+    public final Type type; // type (1 byte)
+    // TODO: Is len supposed to inclurde the type bytes? Right now it doesn't
+    private final int len; // length (4 bytes)
+    private final ByteBuffer payload; // payload (len bytes)
 
-    private Message(Type t, int len, ByteBuffer buf) {
+    private Message(Type t, int len, ByteBuffer payload) {
         this.type = t;
         this.len = len;
-        this.buf = buf;
+        this.payload = payload;
     }
 
     // Get message from input stream
@@ -61,8 +61,7 @@ class Message {
         ByteBuffer payload = ByteBuffer.allocate(len);
         in.read(payload.array(), 0, len);
 
-        // Should buf be payload?
-        return new Message(t, len, buf);
+        return new Message(t, len, payload);
     }
 
     // Put this message on an output stream
@@ -73,8 +72,8 @@ class Message {
         buf.putInt(this.len);
         // type of message
         buf.put(this.type.asByte());
-        // payload?
-        buf.put(this.buf.array());
+        // payload
+        buf.put(this.payload.array());
 
         // write entire message
         out.write(buf.array());
@@ -113,11 +112,11 @@ class Message {
                 return new NoPayload();
             case Have:
             case Request:
-                return new IndexPayload(this.buf);
+                return new IndexPayload(this.payload);
             case Bitfield:
-                return new BitfieldPayload(this.buf);
+                return new BitfieldPayload(this.payload);
             case Piece:
-                return new PiecePayload(this.buf);
+                return new PiecePayload(this.payload);
         }
         return null;
     }
