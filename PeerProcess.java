@@ -17,7 +17,6 @@ public class PeerProcess {
 
     private int myid; // the id of this peer
     private int listenport; // port number this peer listens on
-    private ServerSocket listener; // socket this peer listens o
 
     // Map neighbor peerid to peer
     HashMap<Integer, NeighborPeer> neighbors = new HashMap<Integer, NeighborPeer>();
@@ -33,6 +32,9 @@ public class PeerProcess {
     private String FileName;
     private int FileSize;
     private int PieceSize;
+
+    // Number of peers to wait for contact from (ids greater than my id)
+    private int num_wait;
 
     private int hasFile; // whether we start with the file or not
     // pieces of file that we have
@@ -54,13 +56,15 @@ public class PeerProcess {
 	// Create and initialize this peer's instance
 	PeerProcess p = new PeerProcess(id);
 
+        // Separate thread to listen for new connections
+        // Peer connections spawn from either here or connectNeighbors
+        // Should receive connection from each of peers with higher id
+	p.listenForConnection();
+
 	// Start connections with neighbors w/ peerid lower than myid
 	p.connectNeighbors();
-
-	// Listen for new connections coming in
-	p.listenForConnection();
 	
-	//TODO: Wait here for children threads to exit
+        //TODO: File torrenting here ...
 
 	return;
     }
@@ -97,8 +101,6 @@ public class PeerProcess {
 
         logger.debug("BitSet of {} set to {}", this.myid, this.pieces.toString());
 
-	// Set up listening socket
-	this.listener = new ServerSocket(this.listenport);
     }
 
 
@@ -161,6 +163,8 @@ public class PeerProcess {
 
         logger.debug("reading peer config");
 
+        this.num_wait = 0;
+
 	try {
 	    BufferedReader reader = new BufferedReader(new FileReader(this.peerInfoFileName));
 	    String line = reader.readLine();
@@ -176,17 +180,21 @@ public class PeerProcess {
 		    String hostname = split_line[1];
 		    int port = Integer.parseInt(split_line[2]);
 
-		    // Don't add self to neighbors
+                    // Is this peer self or not
 		    if (id != this.myid) {
 			NeighborPeer nbr = new NeighborPeer(id, port, hostname);
 			// Add neighboring peers' info to NeighborPeer hash-map
 			this.neighbors.put(id, nbr);
+                        if (id > this.myid) {
+                           this.num_wait++;
+                        }
 		    } else {
 			// Set current peer's port number
 			this.listenport = port;
                         // Whether it has the file or not
 		        this.hasFile = Integer.parseInt(split_line[3]);
 		    }
+
 		}
 
 		line = reader.readLine();
@@ -261,14 +269,10 @@ public class PeerProcess {
      */
     public void listenForConnection() throws Exception {
 
-	// keep listening
-	while (true) {
-	    // Listen for connection from another peer.
-	    Socket connection = this.listener.accept();
+        ServerSocket listener = new ServerSocket(this.listenport);
 
-	    // Create a separate thread for all future communication w/ this peer
-	    new PeerConnection(this, connection, this.myid).start();
-	}
+        logger.debug("Peer {} is beginning PeerListener", this.myid);
+        new PeerListener(this, this.myid, this.num_wait, listener).start();
     }
 
     /**

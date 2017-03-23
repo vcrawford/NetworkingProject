@@ -177,14 +177,16 @@ public class PeerConnection extends Thread {
     // bitfield message.
     private void exchangeBitfield() throws IOException {
 
-	// Send own bitfield to peer
+        // Send own bitfield to peer
+        // TODO: Only if non-empty?
         try {
-            logger.debug("acquiring pieces read lock");
-            parent.pieces_lock.readLock().lock();
+            logger.debug("Peer {} acquiring pieces read lock", this.myid);
+            this.parent.pieces_lock.readLock().lock();
 
             // Form bitfield message
             Message my_bits_msg = Message.bitfield(parent.pieces);
-            logger.info("sending bitfield {} to {}", parent.pieces, this.peerid);
+            logger.info("Peer {} sending bitfield {} to {}", this.myid,
+                this.parent.pieces, this.peerid);
 
             // Send bitfield message
             my_bits_msg.to_stream(this.connection.getOutputStream());
@@ -195,7 +197,7 @@ public class PeerConnection extends Thread {
 
         } finally {
 	    // Release bitfield read lock
-            logger.debug("releasing pieces read lock");
+            logger.debug("Peer {} releasing pieces read lock", this.peerid);
             parent.pieces_lock.readLock().unlock();
         }
 
