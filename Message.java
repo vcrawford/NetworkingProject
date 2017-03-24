@@ -92,7 +92,7 @@ class Message {
     }
 
     // Make a bitfield message 
-    public static Message bitfield(BitSet bits) {
+	public static Message bitfield(BitSet bits) {
         ByteBuffer buf = ByteBuffer.wrap(bits.toByteArray());
         return new Message(Type.Bitfield, buf.array().length, buf);
     }
