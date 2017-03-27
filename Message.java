@@ -97,8 +97,8 @@ class Message {
     }
 
     // A message transmitting a file piece
-    public static Message piece(Type t, byte[] contents) {
-    	Message msg = new Message(t, contents.length, ByteBuffer.wrap(contents));
+    public static Message piece(byte[] contents) {
+    	Message msg = new Message(Type.Piece, contents.length, ByteBuffer.wrap(contents));
         return msg;
     }
 

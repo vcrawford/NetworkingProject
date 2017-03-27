@@ -52,6 +52,7 @@ public class PeerProcess {
 	// Store nbr IDs
     private HashMap<Integer, PeerStatus> neighborStatus = new HashMap<Integer, PeerStatus>(); // status of neighbor
     private HashMap<Integer, Integer> neighborVolume = new HashMap<Integer, Integer>(); // number of bytes sent in previous interval
+    private HashMap<Integer, Integer> neighborRequests = new HashMap<Integer, Integer>(); // requested piece (0 or 1) for each neighbor
 
     private enum PeerStatus {
         Choked, Unchoked, Optimistic;
@@ -292,6 +293,8 @@ public class PeerProcess {
         dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
         dispatcher.subscribe(topic("recv/choke"), PeerConnection.PeerMessage.class, new ChokeHandler());
         dispatcher.subscribe(topic("recv/unchoke"), PeerConnection.PeerMessage.class, new UnchokeHandler());
+        dispatcher.subscribe(topic("recv/request"), PeerConnection.PeerMessage.class, new RequestHandler());
+        dispatcher.subscribe(topic("recv/piece"), PeerConnection.PeerMessage.class, new PieceHandler());
     }
 
     private class ConnectedHandler implements Subscriber<NeighborPeer> {
@@ -323,12 +326,51 @@ public class PeerProcess {
     private class ChokeHandler implements Subscriber<PeerConnection.PeerMessage> {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
             logger.info("received choke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+
+            neighborRequests.remove(event.getSource().id);
+            // TODO: cancel request timer
         }
     }
 
     private class UnchokeHandler implements Subscriber<PeerConnection.PeerMessage> {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
             logger.info("received unchoke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+
+            assert(neighborRequests.get(event.getSource().id) == null);
+            Integer idx = fH.getPieceIndexToReceive();
+            if(idx < 0) {
+                logger.info("not requesting any pieces, done with file (self = {})", myid);
+            } else {
+                logger.info("requesting piece {} from {} (self = {})", idx, event.getSource().id, myid);
+                neighborRequests.put(event.getSource().id, idx);
+                message(event.getSource().id, Message.index(Message.Type.Request, idx));
+                // TODO: start timer that cancels the request.
+            }
+        }
+    }
+
+    private class RequestHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+            Integer idx = ((Message.IndexPayload)event.getSource().msg.getPayload()).index;
+            logger.info("received request message for {} from {} (self = {})", idx, event.getSource().id, PeerProcess.this.myid);
+
+            if(neighborStatus.get(event.getSource().id) == PeerStatus.Choked) {
+                logger.info("ignoring request from {}, they are choked (self = {})", event.getSource().id, myid);
+            } else if(idx < 0 || idx > fH.maxPiece()) {
+                logger.info("ignoring request from {}, invalid piece {} requested (self = {})", event.getSource().id, idx, myid);
+            } else {
+                message(event.getSource().id, Message.piece(fH.getPieceToSend(idx)));
+            }
+        }
+    }
+
+    private class PieceHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+            logger.info("received piece message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+
+            if(neighborRequests.get(event.getSource().id) == null) {
+                logger.warn("did not expect piece from {}, unable to identify (self = {})", event.getSource().id, myid);
+            }
         }
     }
 

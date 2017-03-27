@@ -273,4 +273,8 @@ public class FileHandle {
 
 		return ids;
 	}
+
+    public Integer maxPiece() {
+        return numPieces;
+    }
 }
