@@ -62,7 +62,7 @@ public class PeerConnection extends Thread {
 	 */
 	public void run() {
 
-		logger.info("new connection (peer = {}, self = {})", this.peerid, this.myid);
+		logger.debug("new connection (peer = {}, self = {})", this.peerid, this.myid);
 
 		// create the socket if it doesn't exist
 		// (this peer is the initiator of the communication)
@@ -98,6 +98,12 @@ public class PeerConnection extends Thread {
 				return;
 			}
 		}
+		
+		// Generate log depending on who initiated the connection
+		if (this.myid < this.peerid)
+			logger.info("Peer {} makes a connection to Peer {}.", this.myid, this.peerid);
+		else
+			logger.info("Peer {} is connected from Peer {}", this.myid, this.peerid);
 
 		// We have a connection, time to handshake ...
 		this.exchangeHandshake();
@@ -114,7 +120,7 @@ public class PeerConnection extends Thread {
 		}
 
 		// Connection complete
-		logger.info("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
+		logger.debug("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
 	}
 
 	/**
@@ -180,7 +186,7 @@ public class PeerConnection extends Thread {
 			Message my_bits_msg = Message.bitfield(myBitField);
 
 			// Send bit-field message
-			logger.info("Peer {} sending bitfield {} of size {} to {}", this.myid, myBitField.toString(),
+			logger.debug("Peer {} sending bitfield {} of size {} to {}", this.myid, myBitField.toString(),
 					myBitField.size(), this.peerid);
 			my_bits_msg.to_stream(this.connection.getOutputStream());
 
@@ -204,7 +210,7 @@ public class PeerConnection extends Thread {
 				// Set bit-field in the file handle
 				this.fH.setBitfield(this.peerid, peerBitField);
 			} else {
-				logger.info("failed to receive bitfield from {} (actual type: {})", this.peerid, response.type);
+				logger.debug("failed to receive bitfield from {} (actual type: {})", this.peerid, response.type);
 			}
 
 		} catch (IOException e) {
@@ -223,11 +229,11 @@ public class PeerConnection extends Thread {
 
 			if (interest == true) {
 				// There are some pieces we are interested in
-				logger.info("sending interested message to {}", this.peerid);
+				logger.debug("sending interested message to {}", this.peerid);
 				Message.empty(Message.Type.Interested).to_stream(this.connection.getOutputStream());
 			} else {
 				// There are no pieces we are interested in
-				logger.info("sending not-interested message to {}", this.peerid);
+				logger.debug("sending not-interested message to {}", this.peerid);
 				Message.empty(Message.Type.NotInterested).to_stream(this.connection.getOutputStream());
 			}
 		} catch (IOException e) {

@@ -128,8 +128,8 @@ public class FileHandle {
 	 * Is called by peer-thread to determine if I am interested in a peer whose bit-field is given as argument
 	 */
 	public boolean checkInterest(Integer peerid) {
-		// TODO: implementation
-		return true;
+		// TODO: proper implementation
+		return (! this.hasFile);
 	}
 
 	/**

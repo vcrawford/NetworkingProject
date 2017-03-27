@@ -77,7 +77,7 @@ public class PeerProcess {
 	public PeerProcess(int id) throws Exception {
 
 		logger.setLevel(Level.DEBUG);
-		logger.info("peer starting (id = {})", id);
+		logger.debug("peer starting (id = {})", id);
 
 		// peer id
 		this.myid = id;
@@ -118,7 +118,7 @@ public class PeerProcess {
 	 */
 	private void connectNeighbors() throws IOException {
 
-		logger.info("connecting to peers with lower ids");
+		logger.debug("connecting to peers with lower ids");
 
 		// All neighbor ids (read from peer info file)
 		Set<Integer> peerids = this.neighbors.keySet();
@@ -136,7 +136,7 @@ public class PeerProcess {
 			}
 		}
 
-		logger.info("done connecting to peers");
+		logger.debug("done connecting to peers");
 	}
 
 	/**
@@ -261,9 +261,6 @@ public class PeerProcess {
 	 * connection (for example, handshake) msg is what message should initially be sent
 	 */
 	public void peerConnection(NeighborPeer peer) throws IOException {
-
-		logger.info("connecting to peer (id = {}, self = {})", peer.getID(), this.myid);
-
 		// Create a separate thread for all future communication w/ this peer
 		logger.debug("spinning up connection thead");
 		new PeerConnection(this, this.myid, peer, this.fH).start();
