@@ -16,9 +16,10 @@ for dirname in dir:
     if not os.path.exists(dirname):
         os.mkdir(dirname)           
 
-# Placing file inside first client i.e. 1001        
+# Placing file inside first client i.e. 1001      
+val = 50  # Just any non-zero value
 if not os.path.exists(file_name):
     file = os.path.join(dir[0], file_name)
-    buffer = (c_byte * file_size) (0)
+    buffer = (c_byte * file_size) (*[val] * file_size)
     open(file, 'wb').write(buffer)
     

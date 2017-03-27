@@ -1,3 +1,4 @@
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -5,9 +6,11 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.util.Random;
 
 import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
 
 /**
@@ -69,6 +72,8 @@ public class FileHandle {
 		this.idxBeingRequested = new HashSet<Integer>();
 		this.bwScores = new HashMap<Integer, Double>();
 
+		this.lock = new Object();
+		
 		// Random object to generate random index to be requested
 		this.rand = new Random(1337);
 
@@ -77,7 +82,7 @@ public class FileHandle {
 		try {
 			f = new RandomAccessFile(fileNameWithPath, "rw");
 		} catch (FileNotFoundException e) {
-			logger.error("Unable to open: {}", fileNameWithPath);
+			logger.error("Failed to open: {}", fileNameWithPath);
 			e.printStackTrace();
 		}
 		// Allocate on disk to enable random seeks
@@ -85,7 +90,7 @@ public class FileHandle {
 			try {
 				f.setLength(this.fileSize);
 			} catch (IOException e) {
-				logger.error("Unable to allocate {} bytes memory", this.fileSize);
+				logger.error("Failed to allocate {} bytes memory", this.fileSize);
 				e.printStackTrace();
 			}
 		}
@@ -100,10 +105,10 @@ public class FileHandle {
 	}
 
 	/**
-	 * Peer-thread calls this function. Whenever I receive a piece from peer, I update my own bit-field with this newly
+	 * Whenever I receive a piece from peer, I update my own bit-field with this newly
 	 * received piece
 	 */
-	public void updateBitfield(Integer pieceIndex) {
+	private void updateBitfield(Integer pieceIndex) {
 		// Set the bit at pieceIndex to True
 		// lock the file handle
 		synchronized (lock) {
@@ -199,36 +204,40 @@ public class FileHandle {
 		try {
 			f.write(piece, pieceIdx * this.pieceSize, pieceLen);
 		} catch (IOException e) {
+			logger.error("Failed writing {} of length {}", pieceIdx, pieceLen);
 			e.printStackTrace();
 		}
+		
+		// Add this piece to my bit-field
+		this.updateBitfield(pieceIdx);
 	}
 
 	/**
 	 * Is called by the peer-thread.
 	 * 
-	 * @param pieceIndex
-	 * @param piece
-	 *            A byte-array. Must be allocated by the caller
-	 * @param maxPieceLen
-	 *            Size of byte-array
-	 * @return Length of piece that was read from file. In case of last-piece of file, the length may be lesser than
-	 *         maxPieceLen.
+	 * @param pieceIdx
+	 * @return Length of piece that was read from file. In case of last-piece of file, 
+	 *         the length may be lesser than maxPieceLen.
 	 */
-	public Integer getPieceToSend(Integer pieceIndex, byte[] piece, Integer maxPieceLen) {
+	public byte [] getPieceToSend(Integer pieceIdx) {
 		Integer pieceLen = 0;
+		Integer maxPieceLen = this.pieceSize;
+		byte [] piece = new byte[maxPieceLen];
 
 		try {
-			pieceLen = f.read(piece, pieceIndex * this.pieceSize, maxPieceLen);
+			pieceLen = f.read(piece, pieceIdx * this.pieceSize, maxPieceLen);
 		} catch (IndexOutOfBoundsException e) {
 			/*
-			 * Only able to read few bytes because this piecce was located near EOF. Data in piece is still valid
+			 * Only able to read few bytes because this piece was located near EOF. 
+			 * Data in piece is still valid
 			 */
-			return pieceLen;
+			return Arrays.copyOfRange(piece, 0, pieceLen);
 		} catch (IOException e) {
+			logger.error("Failed reading piece {} to send", pieceIdx);
 			e.printStackTrace();
 		}
 
-		return pieceLen;
+		return Arrays.copyOfRange(piece, 0, pieceLen);
 	}
 
 	/**

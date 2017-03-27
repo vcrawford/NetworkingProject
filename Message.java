@@ -36,11 +36,10 @@ class Message {
     };
 
     public final Type type; // type (1 byte)
-    // TODO: Is len supposed to inclurde the type bytes? Right now it doesn't
-    private final int len; // length (4 bytes)
-    private final ByteBuffer payload; // payload (len bytes)
+    public final int len; // length of payload
+    public final ByteBuffer payload; // payload (len bytes)
 
-    private Message(Type t, int len, ByteBuffer payload) {
+    public Message(Type t, int len, ByteBuffer payload) {
         this.type = t;
         this.len = len;
         this.payload = payload;
@@ -99,7 +98,8 @@ class Message {
 
     // A message transmitting a file piece
     public static Message piece(Type t, byte[] contents) {
-        return new Message(t, contents.length, ByteBuffer.wrap(contents));
+    	Message msg = new Message(t, contents.length, ByteBuffer.wrap(contents));
+        return msg;
     }
 
     // TODO: Other payloads

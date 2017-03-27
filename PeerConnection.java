@@ -6,9 +6,11 @@ import java.net.Socket;
 import java.util.concurrent.TimeUnit;
 import java.util.BitSet;
 
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
+
 
 /**
  * Thread class to process a received connection between me and a peer
@@ -116,13 +118,91 @@ public class PeerConnection extends Thread {
 			this.notifyInterested();
 
 		} catch (IOException e) {
+			logger.debug("Error: Exchange bit-field of Interested msg failed");
 			return;
 		}
+		
+		/********************************************************/
+		/******** Threads enters send/receive loop **************/
+		/********************************************************/
+		logger.debug("Peer {} thread enters send/receive loop", this.peerid);
+		
+		// Flag to indicate if all peers have complete files it's time to exit
+		// Enable it to start working on sending/receiving. That code has bugs right now.
+		Boolean all_complete = true;
+		
+		while(all_complete == false){
+			Integer rcvPieceIdx = 0;
+			
+			// Send request for a piece
+			if(true /*this.fH.checkInterest(this.peerid)*/){
+				Message msg;
+				rcvPieceIdx = this.fH.getPieceIndexToReceive();
+				logger.debug("Sending request for piece {} to peer {}", rcvPieceIdx, this.peerid);
+				msg = Message.index(Message.Type.Request, rcvPieceIdx);
+				try {
+					msg.to_stream(this.connection.getOutputStream());
+					logger.debug("Sent request for piece {} to peer {}", rcvPieceIdx, this.peerid);
+				} catch (IOException e) {
+					logger.debug("Error: Failed sending request for piece {} to peer {}", rcvPieceIdx, this.peerid);
+					e.printStackTrace();
+					this.exitThread();
+				} 
+			}
+			
+			// Receive request for piece
+			Integer timeout = 0;
+			logger.debug("Receiving request for piece from peer {}", this.peerid);
+			Integer sndPieceIdx = receivePieceRequest(timeout);
+			logger.debug("Received request for piece {} to peer {}", sndPieceIdx, this.peerid);
+			
+			// Send piece
+			// Right now, if a peer has complete file, it sends -1 as piece index
+			// Hence skip sending piece to such peer 
+			if (sndPieceIdx != -1){
+				byte [] sndPiece = this.fH.getPieceToSend(sndPieceIdx);
+				Message msg = Message.piece(Message.Type.Piece, sndPiece);
+				logger.debug("Sending piece {} of len {} to peer {}", sndPieceIdx, msg.len, this.peerid);
+				Boolean status = sendMsg(msg);	
+				logger.debug("Sent piece {} to peer {}", sndPieceIdx, this.peerid);
+			}
+			
+			// Receive piece
+			// If I already have all the pieces I would have sent rcvPieceIdx as
+			// -1. In such case I don't expect peer to return me a piece
+			if (rcvPieceIdx != -1){
+				try {
+					logger.debug("Receiving piece {} from peer {}", rcvPieceIdx, this.peerid);
+					Message rcvMsg = Message.from_stream(this.connection.getInputStream());
+					logger.debug("Received piece {} of len {} from peer {}", rcvPieceIdx, rcvMsg.len, this.peerid);
+					byte [] rcvPiece = rcvMsg.payload.array();
+					//write piece to file
+					this.fH.writePiece(rcvPieceIdx, rcvPiece, rcvPiece.length);
+				} catch (IOException e) {
+					
+					e.printStackTrace();
+					this.exitThread();
+				}		
+			}
 
+			
+			
+			
+			// recompute all_complete
+		}
+		
 		// Connection complete
-		logger.debug("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
+		this.exitThread();
 	}
 
+	/**
+	 * Function to print that thread is exiting 
+	 */
+	private void exitThread(){
+		logger.debug("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
+		System.exit(0);
+	}
+	
 	/**
 	 * Send handshake message, and receive handshake message from peer.
 	 */
@@ -241,4 +321,51 @@ public class PeerConnection extends Thread {
 			throw e;
 		}
 	}
+	
+	/**
+	 * See if I have a request for piece. Wait till the time specified by the 
+	 * timeout argument. If a request if found within this timeout, then return
+	 * the correct piece index, otherwise return -1
+	 * 
+	 * @param timeout
+	 */
+	private Integer receivePieceRequest(Integer timeout){
+		Integer pieceIdx = -1;
+		
+		// TODO: implement timeout based processing
+		
+		try {
+			Message response = Message.from_stream(this.connection.getInputStream());
+			
+			if (response.type == Message.Type.Request){
+				assert (response.len == 4); //Length of response must be 4 bytes
+				pieceIdx = response.payload.getInt();
+			}
+		} catch (IOException e) {
+			logger.debug("Error: Failed receiving request from peer {}", this.peerid);
+			e.printStackTrace();
+			this.exitThread();
+		}
+		
+		return pieceIdx;
+	}
+	
+	/**
+	 * Sends a message to peer
+	 * 
+	 * @param m
+	 * @return sendStatus true if sent successfully
+	 */
+	private Boolean sendMsg(Message m){
+		Boolean sendStatus = false;
+		
+		try {
+			m.to_stream(this.connection.getOutputStream());
+			sendStatus = true;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+		return sendStatus;
+	}	
 }
