@@ -11,6 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
 
+import static com.mycila.event.Topics.*;
+import static com.mycila.event.Topic.*;
+import com.mycila.event.*;
 
 /**
  * Thread class to process a received connection between me and a peer
@@ -21,197 +24,147 @@ public class PeerConnection extends Thread {
 			.getLogger("project.networking.connection");
 
 	private Integer myid; // my ID
-	private Integer peerid; // ID of peer connected to me
 	private Socket connection; // socket
-	// peer process this was spawned from
-	// This might have become useless after inclusion of fileHandle. Remove if so.
-	private final PeerProcess parent;
-	private final FileHandle fH;
-
 	// The neighbor we are connected with, possibly unknown
-	private NeighborPeer connectedWith = null;
+	private NeighborPeer peer = null;
 
 	private static final String handshake_header = "P2PFILESHARINGPROJ";
 
-	/**
-	 * Constructor. Is called while creating the thread that will "send" a connection request to peer.
-	 */
-	public PeerConnection(PeerProcess parent, Integer myid, NeighborPeer peer, FileHandle fH) throws IOException {
-
-		this.logger.setLevel(Level.DEBUG);
-		this.parent = parent;
-		this.fH = fH;
-		this.myid = myid;
-		this.connectedWith = peer;
-		this.peerid = peer.getID();
+    private PeerConnection(Integer myid) {
+        this.myid = myid;
 	}
 
-	/**
-	 * Constructor. Is called while creating the thread that will "listen" for a connection request from peer.
-	 */
-	public PeerConnection(PeerProcess parent, Socket connection, Integer myid, FileHandle fH) {
+    /**
+     * Initiate connection to the given peer.
+     */
+    public static PeerConnection connectTo(Integer myid, NeighborPeer peer) throws IOException {
+        PeerConnection pc = new PeerConnection(myid);
+        pc.peer = peer;
+        return pc;
+    }
 
-		this.logger.setLevel(Level.DEBUG);
-		this.parent = parent;
-		this.fH = fH;
-		this.connection = connection;
-		this.myid = myid;
-		this.peerid = -1; // We don't know the peer yet, will be set by handshake signal
-	}
+    /**
+     * Handle a connection initiated by another peer.
+     */
+    public static PeerConnection handleConnection(Integer myid, Socket sock) throws IOException {
+        PeerConnection pc = new PeerConnection(myid);
+        pc.connection = sock;
+        return pc;
+    }
+
+    /**
+     * Depending on who initiated, either: 
+     * 1. Connect to a remote peer, establishing the `connection`
+     * variable.
+     * 2. Wait for a handshake message on the connection, establishing
+     * the `peer` variable.
+     *
+     * Upon completion, both `peer` and `connection` are guaranteed to
+     * be set.
+     */
+    private void preProtocol() throws Exception {
+        if(this.peer == null) {
+            assert(this.connection != null);
+            this.peer = this.awaitHandshake();
+            assert(this.peer != null);
+            this.sendHandshake();
+        } else if(this.connection == null) {
+            assert(this.peer != null);
+            this.connection = new Socket(this.peer.getHostName(), this.peer.getPort());
+            this.sendHandshake();
+            NeighborPeer validate = this.awaitHandshake();
+            if(this.peer.getID() != validate.getID()) {
+                logger.error("connected peer returned mismatching handshake! (target = {}, actual = {})", this.peer.getID(), validate.getID());
+            }
+        }
+    }
 
 	/**
 	 * Run the thread
 	 */
 	public void run() {
+        try {
+            preProtocol(); // sets up assumed preconditions
+        } catch(Exception e) {
+            logger.error("failed to handshake, closing connection: {}", e);
+            this.exitThread();
+        }
 
-		logger.debug("new connection (peer = {}, self = {})", this.peerid, this.myid);
+		logger.debug("new connection (peer = {}, self = {})", this.peer.getID(), this.myid);
 
-		// create the socket if it doesn't exist
-		// (this peer is the initiator of the communication)
-		while (this.connection == null && this.connectedWith != null) {
-
-			// Need hostname, port
-			String hostname = this.connectedWith.getHostName();
-			int port = this.connectedWith.getPort();
-			logger.debug("creating socket ({}:{})", hostname, port);
-
-			try {
-
-				// Try to start connection
-				this.connection = new Socket(hostname, port);
-
-			} catch (java.net.ConnectException _e) {
-
-				logger.debug("failed to create socket ({}:{}). retrying in 5s", hostname, port);
-				try {
-					TimeUnit.SECONDS.sleep(5);
-				} catch (Exception e) {
-					logger.error("failed to create socket ({}:{})", hostname, port);
-					e.printStackTrace();
-					return;
-				}
-
-			} catch (java.net.UnknownHostException _e) {
-				logger.error("failed to find host {}", hostname);
-				return;
-
-			} catch (IOException e) {
-				logger.error("socket creation failed with IOException: {}", e);
-				return;
-			}
-		}
-		
 		// Generate log depending on who initiated the connection
-		if (this.myid < this.peerid)
-			logger.info("Peer {} makes a connection to Peer {}.", this.myid, this.peerid);
+		if (this.myid < this.peer.getID())
+        {
+            logger.info("Peer {} makes a connection to Peer {}.", this.myid, this.peer.getID());
+        }
 		else
-			logger.info("Peer {} is connected from Peer {}", this.myid, this.peerid);
+        {
+            logger.info("Peer {} is connected from Peer {}", this.myid, this.peer.getID());
+        }
 
-		// We have a connection, time to handshake ...
-		this.exchangeHandshake();
+        PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/send", this.peer.getID())), Message.class, new SendHandler());
+        PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/close", this.peer.getID())), Void.class, new CloseHandler());
 
-		try {
-			// Now exchange bitfields ...
-			this.exchangeBitfield();
-
-			// Notify whether we are interested in any of these bitfields
-			this.notifyInterested();
-
-		} catch (IOException e) {
-			logger.debug("Error: Exchange bit-field of Interested msg failed");
-			return;
-		}
+        PeerProcess.dispatcher.publish(topic("connected"), this.peer);
 		
 		/********************************************************/
 		/******** Threads enters send/receive loop **************/
 		/********************************************************/
-		logger.debug("Peer {} thread enters send/receive loop", this.peerid);
-		
-		// Flag to indicate if all peers have complete files it's time to exit
-		// Enable it to start working on sending/receiving. That code has bugs right now.
-		Boolean all_complete = true;
-		
-		while(all_complete == false){
-			Integer rcvPieceIdx = 0;
-			
-			// Send request for a piece
-			if(true /*this.fH.checkInterest(this.peerid)*/){
-				Message msg;
-				rcvPieceIdx = this.fH.getPieceIndexToReceive();
-				logger.debug("Sending request for piece {} to peer {}", rcvPieceIdx, this.peerid);
-				msg = Message.index(Message.Type.Request, rcvPieceIdx);
-				try {
-					msg.to_stream(this.connection.getOutputStream());
-					logger.debug("Sent request for piece {} to peer {}", rcvPieceIdx, this.peerid);
-				} catch (IOException e) {
-					logger.debug("Error: Failed sending request for piece {} to peer {}", rcvPieceIdx, this.peerid);
-					e.printStackTrace();
-					this.exitThread();
-				} 
-			}
-			
-			// Receive request for piece
-			Integer timeout = 0;
-			logger.debug("Receiving request for piece from peer {}", this.peerid);
-			Integer sndPieceIdx = receivePieceRequest(timeout);
-			logger.debug("Received request for piece {} to peer {}", sndPieceIdx, this.peerid);
-			
-			// Send piece
-			// Right now, if a peer has complete file, it sends -1 as piece index
-			// Hence skip sending piece to such peer 
-			if (sndPieceIdx != -1){
-				byte [] sndPiece = this.fH.getPieceToSend(sndPieceIdx);
-				Message msg = Message.piece(Message.Type.Piece, sndPiece);
-				logger.debug("Sending piece {} of len {} to peer {}", sndPieceIdx, msg.len, this.peerid);
-				Boolean status = sendMsg(msg);	
-				logger.debug("Sent piece {} to peer {}", sndPieceIdx, this.peerid);
-			}
-			
-			// Receive piece
-			// If I already have all the pieces I would have sent rcvPieceIdx as
-			// -1. In such case I don't expect peer to return me a piece
-			if (rcvPieceIdx != -1){
-				try {
-					logger.debug("Receiving piece {} from peer {}", rcvPieceIdx, this.peerid);
-					Message rcvMsg = Message.from_stream(this.connection.getInputStream());
-					logger.debug("Received piece {} of len {} from peer {}", rcvPieceIdx, rcvMsg.len, this.peerid);
-					byte [] rcvPiece = rcvMsg.payload.array();
-					//write piece to file
-					this.fH.writePiece(rcvPieceIdx, rcvPiece, rcvPiece.length);
-				} catch (IOException e) {
-					
-					e.printStackTrace();
-					this.exitThread();
-				}		
-			}
+		logger.debug("Peer {} thread enters send/receive loop", this.peer.getID());
 
-			
-			
-			
-			// recompute all_complete
-		}
-		
-		// Connection complete
-		this.exitThread();
+        while(true) {
+            Message msg;
+            try {
+                 msg = Message.from_stream(this.connection.getInputStream());
+            } catch(Exception e) {
+                PeerProcess.dispatcher.publish(topic("recv/error"), e);
+                continue;
+            }
+            switch (msg.type) {
+                case Choke:
+                    PeerProcess.dispatcher.publish(topic("recv/choke"), peer(msg));
+                    break;
+                case Unchoke:
+                    PeerProcess.dispatcher.publish(topic("recv/unchoke"), peer(msg));
+                    break;
+                case Interested:
+                    PeerProcess.dispatcher.publish(topic("recv/interested"), peer(msg));
+                    break;
+                case NotInterested:
+                    PeerProcess.dispatcher.publish(topic("recv/not-interested"), peer(msg));
+                    break;
+                case Have:
+                    PeerProcess.dispatcher.publish(topic("recv/have"), peer(msg));
+                    break;
+                case Bitfield:
+                    PeerProcess.dispatcher.publish(topic("recv/bitfield"), peer(msg));
+                    break;
+                case Request:
+                    PeerProcess.dispatcher.publish(topic("recv/request"), peer(msg));
+                    break;
+                case Piece:
+                    PeerProcess.dispatcher.publish(topic("recv/piece"), peer(msg));
+                    break;
+                default:
+                    PeerProcess.dispatcher.publish(topic("recv/malformed"), peer(msg));
+                    break;
+            }
+        }
 	}
 
 	/**
 	 * Function to print that thread is exiting 
 	 */
 	private void exitThread(){
-		logger.debug("closing connection thread (peer = {}, self = {})", this.peerid, this.myid);
+		logger.debug("closing connection thread (peer = {}, self = {})", this.peer.getID(), this.myid);
 		System.exit(0);
 	}
-	
-	/**
-	 * Send handshake message, and receive handshake message from peer.
-	 */
-	private void exchangeHandshake() {
 
+    private void sendHandshake() {
 		// Send a handshake message
 		try {
-			// It's possible that the peerid is still -1, since we might've initiated
-			logger.debug("handshaking {} (self = {})", this.peerid, this.myid);
+			// It's possible that the peer.getID() is still -1, since we might've initiated
+			logger.debug("handshaking {} (self = {})", this.peer.getID(), this.myid);
 
 			// Send handshake bytes
 			ByteBuffer buf = ByteBuffer.allocate(32);
@@ -219,10 +172,11 @@ public class PeerConnection extends Thread {
 			buf.putInt(28, this.myid);
 			this.connection.getOutputStream().write(buf.array());
 		} catch (Exception e) {
-
 			logger.error("failed to send handshake {}", e);
 		}
+    }
 
+    private NeighborPeer awaitHandshake() throws Exception{
 		// Receive handshake
 		try {
 			// Read in message
@@ -236,136 +190,51 @@ public class PeerConnection extends Thread {
 
 			if (!test.equals(handshake_header)) {
 				// Was not the handshake message
-				logger.error("received invalid handshake from {} (handshake_header = {}, self = {})", this.peerid,
+				logger.error("received invalid handshake from {} (handshake_header = {}, self = {})", this.peer.getID(),
 						test, this.myid);
+                throw new Exception("invalid handshake header");
 			}
 
 			// Get the peer that we're talking to
-			this.peerid = buf.getInt(28);
-			this.connectedWith = new NeighborPeer(this.peerid, this.connection.getPort(), this.connection
+			int id = buf.getInt(28);
+			NeighborPeer peer = new NeighborPeer(id, this.connection.getPort(), this.connection
 					.getInetAddress().getHostName());
 
-			logger.debug("received handshake from {} (self = {})", this.peerid, this.myid);
-
+			logger.debug("received handshake from {} (self = {})", peer.getID(), this.myid);
+            return peer;
 		} catch (Exception e) {
-
 			logger.error("failed to receive handshake {}", e);
+            throw e;
 		}
 	}
 
-	// Returns either the next message or null if the peer sent a
-	// bit-field message.
-	private void exchangeBitfield() throws IOException {
+    private class SendHandler implements Subscriber<Message> {
+        public void onEvent(Event<Message> event) throws IOException {
+            event.getSource().to_stream(PeerConnection.this.connection.getOutputStream());
+        }
+    }
 
-		// Send own bit-field to peer
-		// TODO: For now sending bit-field irrespective of hasFile field. Project
-		// description, however, says that it is optional if hasFile is false
-		try {
-			// Form bit-field message
-			BitSet myBitField = this.fH.getBitfield();
-			Message my_bits_msg = Message.bitfield(myBitField);
+    private class CloseHandler implements Subscriber<Void> {
+        public void onEvent(Event<Void> event) {
+            PeerConnection.this.exitThread();
+        }
+    }
 
-			// Send bit-field message
-			logger.debug("Peer {} sending bitfield {} of size {} to {}", this.myid, myBitField.toString(),
-					myBitField.size(), this.peerid);
-			my_bits_msg.to_stream(this.connection.getOutputStream());
+    public class PeerMessage {
+        public final Integer id;
+        public final Message msg;
 
-		} catch (IOException e) {
-			logger.error("failed to send bitfield to {}: {}", this.peerid, e);
-			throw e;
-		}
+        public PeerMessage(Integer id, Message msg) {
+            this.id = id;
+            this.msg = msg;
+        }
+    }
 
-		// Read in peer's bitfield
-		try {
-			// Get message
-			Message response = Message.from_stream(this.connection.getInputStream());
+    private PeerMessage peer(Message msg) {
+        return new PeerMessage(this.peer.getID(), msg);
+    }
 
-			// Check if bit-field message
-			if (response.type == Message.Type.Bitfield) {
-				// Extract bit-field from message
-				BitSet peerBitField = ((Message.BitfieldPayload) response.getPayload()).bitfield;
-				logger.debug("Received bitfield response {} of size {} from {}", peerBitField.toString(),
-						peerBitField.size(), this.peerid);
-
-				// Set bit-field in the file handle
-				this.fH.setBitfield(this.peerid, peerBitField);
-			} else {
-				logger.debug("failed to receive bitfield from {} (actual type: {})", this.peerid, response.type);
-			}
-
-		} catch (IOException e) {
-
-			logger.error("failed to exchange bitfield with {}: {}", this.peerid, e);
-			throw e;
-		}
-	}
-
-	/**
-	 * Send either an interested message, or a not interested message
-	 */
-	private void notifyInterested() throws IOException {
-		try {
-			boolean interest = this.fH.checkInterest(this.peerid);
-
-			if (interest == true) {
-				// There are some pieces we are interested in
-				logger.debug("sending interested message to {}", this.peerid);
-				Message.empty(Message.Type.Interested).to_stream(this.connection.getOutputStream());
-			} else {
-				// There are no pieces we are interested in
-				logger.debug("sending not-interested message to {}", this.peerid);
-				Message.empty(Message.Type.NotInterested).to_stream(this.connection.getOutputStream());
-			}
-		} catch (IOException e) {
-			logger.error("failed to notify {} of interest: {}", this.peerid, e);
-			throw e;
-		}
-	}
-	
-	/**
-	 * See if I have a request for piece. Wait till the time specified by the 
-	 * timeout argument. If a request if found within this timeout, then return
-	 * the correct piece index, otherwise return -1
-	 * 
-	 * @param timeout
-	 */
-	private Integer receivePieceRequest(Integer timeout){
-		Integer pieceIdx = -1;
-		
-		// TODO: implement timeout based processing
-		
-		try {
-			Message response = Message.from_stream(this.connection.getInputStream());
-			
-			if (response.type == Message.Type.Request){
-				assert (response.len == 4); //Length of response must be 4 bytes
-				pieceIdx = response.payload.getInt();
-			}
-		} catch (IOException e) {
-			logger.debug("Error: Failed receiving request from peer {}", this.peerid);
-			e.printStackTrace();
-			this.exitThread();
-		}
-		
-		return pieceIdx;
-	}
-	
-	/**
-	 * Sends a message to peer
-	 * 
-	 * @param m
-	 * @return sendStatus true if sent successfully
-	 */
-	private Boolean sendMsg(Message m){
-		Boolean sendStatus = false;
-		
-		try {
-			m.to_stream(this.connection.getOutputStream());
-			sendStatus = true;
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		
-		return sendStatus;
-	}	
+    public static String sendTopic(int peerid) {
+        return String.format("peer/%d/send", peerid);
+    }
 }

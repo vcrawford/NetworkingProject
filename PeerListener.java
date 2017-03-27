@@ -52,7 +52,7 @@ public class PeerListener extends Thread {
 				Socket connection = this.listener.accept();
 
 				// Create a separate thread for all future communication w/ this peer
-				new PeerConnection(this.parent, connection, this.myid, this.fH).start();
+                PeerConnection.handleConnection(this.myid, connection).start();
 
 				num_conn++;
 			}

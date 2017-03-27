@@ -3,10 +3,14 @@ import java.io.*;
 import java.util.*; //HashMap
 import java.util.BitSet;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.AbstractMap.SimpleImmutableEntry;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
+import static com.mycila.event.Topics.*;
+import static com.mycila.event.Topic.*;
+import com.mycila.event.*;
 
 /**
  * Represents the peer that is running on this process
@@ -14,6 +18,7 @@ import ch.qos.logback.classic.Level;
 public class PeerProcess {
 	private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
 			.getLogger("project.networking");
+    public static final Dispatcher dispatcher = Dispatchers.asynchronousSafe(ErrorHandlers.rethrow());
 
 	private int myid; // the id of this peer
 	private int listenport; // port number this peer listens on
@@ -86,6 +91,9 @@ public class PeerProcess {
 		readCommonCfgFile();
 		readPeerInfoCfgFile();
 
+        // register event handlers
+        registerHandlers();
+
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
 	}
@@ -132,7 +140,7 @@ public class PeerProcess {
 			// Contact peers if lower peerid
 			if (pid < this.myid) {
 				NeighborPeer peer = this.neighbors.get(pid);
-				this.peerConnection(peer);
+                PeerConnection.connectTo(this.myid, peer).start();
 			}
 		}
 
@@ -256,14 +264,46 @@ public class PeerProcess {
 		new PeerListener(this, this.myid, this.num_wait, listener, this.fH).start();
 	}
 
-	/**
-	 * Start connection with peer, send message Separate thread will handle this communication type is what sort of
-	 * connection (for example, handshake) msg is what message should initially be sent
-	 */
-	public void peerConnection(NeighborPeer peer) throws IOException {
-		// Create a separate thread for all future communication w/ this peer
-		logger.debug("spinning up connection thead");
-		new PeerConnection(this, this.myid, peer, this.fH).start();
-	}
+    /**
+     * The architecture of the event system is basically that
+     * PeerProcess is the brain, and PeerConnections are the workers
+     * that send information to the brain and respond to its commands.
+     *
+     * The two responsibilities of PeerConnection instances are to wait
+     * for messages from peers and notify PeerProcess when they are
+     * receieved, and to send messages to peers.
+     */
+    private void registerHandlers() {
+        dispatcher.subscribe(topic("connected"), NeighborPeer.class, new ConnectedHandler());
+        dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
+    }
 
+    private class ConnectedHandler implements Subscriber<NeighborPeer> {
+        public void onEvent(Event<NeighborPeer> event) {
+            // new connection, we need to send this peer our bitfield
+            message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
+        }
+    }
+
+    private class BitfieldHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+            // received a bitfield, update our store and notify the
+            // other party of whether we're interested.
+            logger.info("received bitfield from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+            BitSet peerBitfield = ((Message.BitfieldPayload)event.getSource().msg.getPayload()).bitfield;
+
+            PeerProcess.this.fH.setBitfield(event.getSource().id, peerBitfield);
+
+            if(PeerProcess.this.fH.checkInterest(event.getSource().id)) {
+                message(event.getSource().id, Message.empty(Message.Type.Interested));
+            } else {
+                message(event.getSource().id, Message.empty(Message.Type.NotInterested));
+            }
+        }
+    }
+
+    // send a message to peer id
+    private void message(int id, Message msg) {
+        PeerProcess.dispatcher.publish(topic(PeerConnection.sendTopic(id)), msg);
+    }
 }
