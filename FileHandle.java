@@ -200,11 +200,20 @@ public class FileHandle {
 	 *            Length of piece. For the last pieceIdx this parameter should specify the length of valid bytes inside
 	 *            piece
 	 */
-	public void writePiece(Integer pieceIdx, byte[] piece, Integer pieceLen) {
+	public void writePiece(Integer pieceIdx, byte[] piece) {
 		try {
-			f.write(piece, pieceIdx * this.pieceSize, pieceLen);
+            if(piece.length <= 0) {
+                logger.error("Cannot write 0-length piece at index {}", pieceIdx);
+                return;
+            }
+            if(pieceIdx * this.pieceSize + piece.length > f.length()) {
+                logger.error("Cannot write piece {}, {} bytes is too large", pieceIdx, piece.length);
+                return;
+            }
+            f.seek(pieceIdx * this.pieceSize);
+            f.write(piece);
 		} catch (IOException e) {
-			logger.error("Failed writing {} of length {}", pieceIdx, pieceLen);
+			logger.error("Failed writing {} of length {}", pieceIdx, piece.length);
 			e.printStackTrace();
 		}
 		
@@ -225,16 +234,12 @@ public class FileHandle {
 		byte [] piece = new byte[maxPieceLen];
 
 		try {
-			pieceLen = f.read(piece, pieceIdx * this.pieceSize, maxPieceLen);
-		} catch (IndexOutOfBoundsException e) {
-			/*
-			 * Only able to read few bytes because this piece was located near EOF. 
-			 * Data in piece is still valid
-			 */
-			return Arrays.copyOfRange(piece, 0, pieceLen);
+            f.seek(pieceIdx * this.pieceSize);
+			pieceLen = f.read(piece);
 		} catch (IOException e) {
 			logger.error("Failed reading piece {} to send", pieceIdx);
 			e.printStackTrace();
+            return null;
 		}
 
 		return Arrays.copyOfRange(piece, 0, pieceLen);

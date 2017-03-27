@@ -51,8 +51,8 @@ public class PeerProcess {
 
 	// Store nbr IDs
     private HashMap<Integer, PeerStatus> neighborStatus = new HashMap<Integer, PeerStatus>(); // status of neighbor
+    private HashMap<Integer, PeerStatus> selfStatus = new HashMap<Integer, PeerStatus>(); // status of self wrt neighbor
     private HashMap<Integer, Integer> neighborVolume = new HashMap<Integer, Integer>(); // number of bytes sent in previous interval
-    private HashMap<Integer, Integer> neighborRequests = new HashMap<Integer, Integer>(); // requested piece (0 or 1) for each neighbor
 
     private enum PeerStatus {
         Choked, Unchoked, Optimistic;
@@ -327,8 +327,19 @@ public class PeerProcess {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
             logger.info("received choke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
 
-            neighborRequests.remove(event.getSource().id);
+            selfStatus.put(event.getSource().id, PeerStatus.Choked);
             // TODO: cancel request timer
+        }
+    }
+
+    private void requestPiece(int peer) {
+        Integer idx = fH.getPieceIndexToReceive();
+        if(idx < 0) {
+            logger.info("not requesting any pieces, done with file (self = {})", myid);
+        } else {
+            logger.info("requesting piece {} from {} (self = {})", idx, peer, myid);
+            message(peer, Message.index(Message.Type.Request, idx));
+            // TODO: start timer that cancels the request.
         }
     }
 
@@ -336,16 +347,8 @@ public class PeerProcess {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
             logger.info("received unchoke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
 
-            assert(neighborRequests.get(event.getSource().id) == null);
-            Integer idx = fH.getPieceIndexToReceive();
-            if(idx < 0) {
-                logger.info("not requesting any pieces, done with file (self = {})", myid);
-            } else {
-                logger.info("requesting piece {} from {} (self = {})", idx, event.getSource().id, myid);
-                neighborRequests.put(event.getSource().id, idx);
-                message(event.getSource().id, Message.index(Message.Type.Request, idx));
-                // TODO: start timer that cancels the request.
-            }
+            selfStatus.put(event.getSource().id, PeerStatus.Unchoked);
+            requestPiece(event.getSource().id);
         }
     }
 
@@ -359,7 +362,12 @@ public class PeerProcess {
             } else if(idx < 0 || idx > fH.maxPiece()) {
                 logger.info("ignoring request from {}, invalid piece {} requested (self = {})", event.getSource().id, idx, myid);
             } else {
-                message(event.getSource().id, Message.piece(fH.getPieceToSend(idx)));
+                byte[] piece = fH.getPieceToSend(idx);
+                if(piece.length <= 0) {
+                    logger.error("file handle returned empty piece, ignoring request (self = {})", myid);
+                } else {
+                    message(event.getSource().id, Message.piece(idx, piece));
+                }
             }
         }
     }
@@ -368,8 +376,14 @@ public class PeerProcess {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
             logger.info("received piece message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
 
-            if(neighborRequests.get(event.getSource().id) == null) {
-                logger.warn("did not expect piece from {}, unable to identify (self = {})", event.getSource().id, myid);
+            Message.PiecePayload payload = ((Message.PiecePayload)event.getSource().msg.getPayload());
+            byte[] content = new byte[payload.length];
+            payload.content.get(content);
+            fH.writePiece(payload.index, content);
+
+            // TODO: have?
+            if(selfStatus.getOrDefault(event.getSource().id, PeerStatus.Choked) == PeerStatus.Unchoked) {
+                requestPiece(event.getSource().id);   
             }
         }
     }

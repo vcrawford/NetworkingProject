@@ -59,6 +59,7 @@ class Message {
         // Read in the payload (which should be of length len)
         ByteBuffer payload = ByteBuffer.allocate(len);
         in.read(payload.array(), 0, len);
+        payload.limit(len);
 
         return new Message(t, len, payload);
     }
@@ -97,8 +98,11 @@ class Message {
     }
 
     // A message transmitting a file piece
-    public static Message piece(byte[] contents) {
-    	Message msg = new Message(Type.Piece, contents.length, ByteBuffer.wrap(contents));
+    public static Message piece(int index, byte[] contents) {
+        ByteBuffer buf = ByteBuffer.allocate(contents.length + 4);
+        buf.putInt(index);
+        buf.put(contents);
+    	Message msg = new Message(Type.Piece, contents.length + 4, buf);
         return msg;
     }
 
@@ -116,7 +120,7 @@ class Message {
             case Bitfield:
                 return new BitfieldPayload(this.payload);
             case Piece:
-                return new PiecePayload(this.payload);
+                return new PiecePayload(this.payload, this.len);
         }
         return null;
     }
@@ -145,9 +149,11 @@ class Message {
     public class PiecePayload extends Payload {
         public final int index; 
         public final ByteBuffer content;
-        private PiecePayload(ByteBuffer buf) {
+        public final int length;
+        private PiecePayload(ByteBuffer buf, int len) {
             this.index = buf.getInt();
             this.content = buf.slice().asReadOnlyBuffer();
+            this.length = len - 4;
         }
     }
 }
