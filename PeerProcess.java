@@ -4,6 +4,8 @@ import java.util.*; //HashMap
 import java.util.BitSet;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +40,9 @@ public class PeerProcess {
 	private int FileSize;
 	private int PieceSize;
 
+    private Timer chokeTimer;
+    private Timer optimisticTimer;
+
 	// Number of peers to wait for contact from (ids greater than my id)
 	private int num_wait;
 
@@ -45,8 +50,12 @@ public class PeerProcess {
 	FileHandle fH;
 
 	// Store nbr IDs
-	private ArrayList<Integer> prefNbr; // preferred neighbors's IDs
-	private ArrayList<Integer> waitNbr; // non-preferrend or waiting neighbors
+    private HashMap<Integer, PeerStatus> neighborStatus = new HashMap<Integer, PeerStatus>(); // status of neighbor
+    private HashMap<Integer, Integer> neighborVolume = new HashMap<Integer, Integer>(); // number of bytes sent in previous interval
+
+    private enum PeerStatus {
+        Choked, Unchoked, Optimistic;
+    }
 
 	/**
 	 * Main function: Starting point
@@ -93,6 +102,7 @@ public class PeerProcess {
 
         // register event handlers
         registerHandlers();
+        registerTimers();
 
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
@@ -176,6 +186,7 @@ public class PeerProcess {
 						NeighborPeer nbr = new NeighborPeer(id, port, hostname);
 						// Add neighboring peers' info to NeighborPeer hash-map
 						this.neighbors.put(id, nbr);
+                        this.neighborStatus.put(id, PeerStatus.Choked);
 						if (id > this.myid) {
 							this.num_wait++;
 						}
@@ -275,11 +286,18 @@ public class PeerProcess {
      */
     private void registerHandlers() {
         dispatcher.subscribe(topic("connected"), NeighborPeer.class, new ConnectedHandler());
+        dispatcher.subscribe(topic("interval/unchoke"), Boolean.class, new UnchokeIntervalHandler());
+
+        // message receipt
         dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
+        dispatcher.subscribe(topic("recv/choke"), PeerConnection.PeerMessage.class, new ChokeHandler());
+        dispatcher.subscribe(topic("recv/unchoke"), PeerConnection.PeerMessage.class, new UnchokeHandler());
     }
 
     private class ConnectedHandler implements Subscriber<NeighborPeer> {
         public void onEvent(Event<NeighborPeer> event) {
+            neighbors.put(event.getSource().getID(), event.getSource());
+            neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
             // new connection, we need to send this peer our bitfield
             message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
         }
@@ -301,9 +319,73 @@ public class PeerProcess {
             }
         }
     }
+    
+    private class ChokeHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+            logger.info("received choke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+        }
+    }
+
+    private class UnchokeHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+            logger.info("received unchoke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
+        }
+    }
+
+    private class UnchokeIntervalHandler implements Subscriber<Boolean> {
+        public void onEvent(Event<Boolean> ignored) {
+            logger.info("updating choke/unchoke settings (self = {})", myid);
+            ArrayList<Integer> peers = new ArrayList<Integer>(neighbors.keySet());
+
+            // sort in descending order
+            Collections.sort(peers, (a, b) -> neighborVolume.getOrDefault(b, 0) - neighborVolume.getOrDefault(a, 0));
+
+            int i = 0;
+            for(; i < NumberOfPreferredNeighbors && i < peers.size(); i++) {
+                PeerStatus old = neighborStatus.get(peers.get(i));
+                neighborStatus.put(peers.get(i), PeerStatus.Unchoked);
+
+                if(old.equals(PeerStatus.Choked)) {
+                    message(peers.get(i), Message.empty(Message.Type.Unchoke));
+                }
+            }
+
+            for(; i < peers.size(); i++) {
+                PeerStatus old = neighborStatus.get(peers.get(i));
+                if(!old.equals(PeerStatus.Optimistic)) {
+                    neighborStatus.put(peers.get(i), PeerStatus.Choked);
+                }
+
+                if(old.equals(PeerStatus.Unchoked)) {
+                    message(peers.get(i), Message.empty(Message.Type.Choke));
+                }
+            }
+        }
+    }
 
     // send a message to peer id
-    private void message(int id, Message msg) {
+    private static void message(int id, Message msg) {
         PeerProcess.dispatcher.publish(topic(PeerConnection.sendTopic(id)), msg);
+    }
+
+    private void registerTimers() {
+        this.chokeTimer = new Timer("choke/unchoke");
+        this.chokeTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/unchoke"), true), 0, this.UnchokingInterval * 1000);
+
+        this.optimisticTimer = new Timer("optimistic");
+        this.optimisticTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/optimistic"), true), 0, this.OptimisticUnchokingInterval * 1000);
+    }
+
+    private static class MessageTask<T> extends TimerTask {
+        private Topic topic;
+        private T value;
+        public MessageTask(Topic t, T value) {
+            this.topic = t;
+            this.value = value;
+        }
+
+        public void run() {
+            PeerProcess.dispatcher.publish(topic, value);
+        }
     }
 }
