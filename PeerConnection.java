@@ -25,6 +25,7 @@ public class PeerConnection extends Thread {
 
 	private Integer myid; // my ID
 	private Socket connection; // socket
+
 	// The neighbor we are connected with, possibly unknown
 	private NeighborPeer peer = null;
 
@@ -36,19 +37,23 @@ public class PeerConnection extends Thread {
 
     /**
      * Initiate connection to the given peer.
+     * Called for each peer of lower id than this one
      */
     public static PeerConnection connectTo(Integer myid, NeighborPeer peer) throws IOException {
         PeerConnection pc = new PeerConnection(myid);
         pc.peer = peer;
+        logger.debug("Initiating a peer connection with peer {} (self={})", peer.getID(), myid);
         return pc;
     }
 
     /**
      * Handle a connection initiated by another peer.
+     * Should receive connections for each peer of higher id
      */
     public static PeerConnection handleConnection(Integer myid, Socket sock) throws IOException {
         PeerConnection pc = new PeerConnection(myid);
         pc.connection = sock;
+        logger.debug("Peer connection initated from unknown peer (self={})", myid);
         return pc;
     }
 
@@ -63,19 +68,47 @@ public class PeerConnection extends Thread {
      * be set.
      */
     private void preProtocol() throws Exception {
+
+        // Finish handshaking. Different behavior depending on who was the initiator.
         if(this.peer == null) {
+            // We received the connection, don't know who from
+
+            // Connection must exist
             assert(this.connection != null);
+
+            // Expect a handshake from them first
             this.peer = this.awaitHandshake();
+
+            // After the handshake, we should know who the peer is
             assert(this.peer != null);
+
+            // Send them our handshake
             this.sendHandshake();
+
+            logger.debug("Pre protocol with initiating peer {} is complete (self={})",
+                this.peer.getID(), this.myid);
+
         } else if(this.connection == null) {
+            // We are initiaing the connection
+
+            // We should know to whom
             assert(this.peer != null);
+
+            // Initiate TCP connection and send handshake
             this.connection = new Socket(this.peer.getHostName(), this.peer.getPort());
             this.sendHandshake();
+
+            // Should get handshake back
             NeighborPeer validate = this.awaitHandshake();
+
             if(this.peer.getID() != validate.getID()) {
-                logger.error("connected peer returned mismatching handshake! (target = {}, actual = {})", this.peer.getID(), validate.getID());
+                // Something went wrong with handshake response ...
+                logger.error("connected peer returned mismatching handshake! (target = {}, actual = {})",
+                    this.peer.getID(), validate.getID());
             }
+
+            logger.debug("Pre protocol with initiating self to peer {} is complete (seld={})",
+                this.peer.getID(), this.myid);
         }
     }
 
@@ -83,73 +116,80 @@ public class PeerConnection extends Thread {
 	 * Run the thread
 	 */
 	public void run() {
-        try {
-            preProtocol(); // sets up assumed preconditions
-        } catch(Exception e) {
-            logger.error("failed to handshake, closing connection: {}", e);
-            this.exitThread();
-        }
 
-		logger.debug("new connection (peer = {}, self = {})", this.peer.getID(), this.myid);
-
-		// Generate log depending on who initiated the connection
-		if (this.myid < this.peer.getID())
-        {
-            logger.info("Peer {} makes a connection to Peer {}.", this.myid, this.peer.getID());
-        }
-		else
-        {
-            logger.info("Peer {} is connected from Peer {}", this.myid, this.peer.getID());
-        }
-
-        PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/send", this.peer.getID())), Message.class, new SendHandler());
-        PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/close", this.peer.getID())), Void.class, new CloseHandler());
-
-        PeerProcess.dispatcher.publish(topic("connected"), this.peer);
-		
-		/********************************************************/
-		/******** Threads enters send/receive loop **************/
-		/********************************************************/
-		logger.debug("Peer {} thread enters send/receive loop", this.peer.getID());
-
-        while(true) {
-            Message msg;
             try {
-                 msg = Message.from_stream(this.connection.getInputStream());
+                // Handshaking protocol
+                preProtocol(); // sets up assumed preconditions
+
             } catch(Exception e) {
-                PeerProcess.dispatcher.publish(topic("recv/error"), e);
-                continue;
+                logger.error("failed to handshake, closing connection: {}", e);
+                this.exitThread();
             }
-            switch (msg.type) {
-                case Choke:
-                    PeerProcess.dispatcher.publish(topic("recv/choke"), peer(msg));
-                    break;
-                case Unchoke:
-                    PeerProcess.dispatcher.publish(topic("recv/unchoke"), peer(msg));
-                    break;
-                case Interested:
-                    PeerProcess.dispatcher.publish(topic("recv/interested"), peer(msg));
-                    break;
-                case NotInterested:
-                    PeerProcess.dispatcher.publish(topic("recv/not-interested"), peer(msg));
-                    break;
-                case Have:
-                    PeerProcess.dispatcher.publish(topic("recv/have"), peer(msg));
-                    break;
-                case Bitfield:
-                    PeerProcess.dispatcher.publish(topic("recv/bitfield"), peer(msg));
-                    break;
-                case Request:
-                    PeerProcess.dispatcher.publish(topic("recv/request"), peer(msg));
-                    break;
-                case Piece:
-                    PeerProcess.dispatcher.publish(topic("recv/piece"), peer(msg));
-                    break;
-                default:
-                    PeerProcess.dispatcher.publish(topic("recv/malformed"), peer(msg));
-                    break;
-            }
-        }
+
+	    logger.debug("new connection (peer = {}, self = {})", this.peer.getID(), this.myid);
+
+
+            // Listen for when we need to send a message on this connection
+            PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/send", this.peer.getID())),
+                Message.class, new SendHandler());
+
+            // Listen for when we need to close this connection
+            PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/close", this.peer.getID())),
+                Void.class, new CloseHandler());
+
+            // Send out connection notification
+            PeerProcess.dispatcher.publish(topic("connected"), this.peer);
+		
+	    /********************************************************/
+	    /******** Threads enters send/receive loop **************/
+	    /********************************************************/
+	    logger.debug("Peer {} thread enters send/receive loop (self={})",
+                this.peer.getID(), this.myid);
+
+	    while(true) {
+
+		Message msg;
+
+		try {
+                     // Receive incoming message
+		     msg = Message.from_stream(this.connection.getInputStream());
+
+		} catch(Exception e) {
+		    PeerProcess.dispatcher.publish(topic("recv/error"), e);
+		    continue;
+		}
+
+                // Take action according to message type
+		switch (msg.type) {
+		    case Choke:
+			PeerProcess.dispatcher.publish(topic("recv/choke"), peer(msg));
+			break;
+		    case Unchoke:
+			PeerProcess.dispatcher.publish(topic("recv/unchoke"), peer(msg));
+			break;
+		    case Interested:
+			PeerProcess.dispatcher.publish(topic("recv/interested"), peer(msg));
+			break;
+		    case NotInterested:
+			PeerProcess.dispatcher.publish(topic("recv/not-interested"), peer(msg));
+			break;
+		    case Have:
+			PeerProcess.dispatcher.publish(topic("recv/have"), peer(msg));
+			break;
+		    case Bitfield:
+			PeerProcess.dispatcher.publish(topic("recv/bitfield"), peer(msg));
+			break;
+		    case Request:
+			PeerProcess.dispatcher.publish(topic("recv/request"), peer(msg));
+			break;
+		    case Piece:
+			PeerProcess.dispatcher.publish(topic("recv/piece"), peer(msg));
+			break;
+		    default:
+			PeerProcess.dispatcher.publish(topic("recv/malformed"), peer(msg));
+			break;
+		}
+	    }
 	}
 
 	/**
@@ -160,24 +200,30 @@ public class PeerConnection extends Thread {
 		System.exit(0);
 	}
 
-    private void sendHandshake() {
-		// Send a handshake message
-		try {
-			// It's possible that the peer.getID() is still -1, since we might've initiated
-			logger.debug("handshaking {} (self = {})", this.peer.getID(), this.myid);
 
+        /**
+         * Send a handshake message to this peer
+         */
+        private void sendHandshake() {
+
+		try {
 			// Send handshake bytes
 			ByteBuffer buf = ByteBuffer.allocate(32);
 			buf.put(handshake_header.getBytes());
 			buf.putInt(28, this.myid);
 			this.connection.getOutputStream().write(buf.array());
+			logger.debug("Sent handshake message to {} (self={})", this.peer.getID(), this.myid);
+
 		} catch (Exception e) {
 			logger.error("failed to send handshake {}", e);
 		}
-    }
+        }
 
+    /**
+     * Wait for handshake message from this peer
+     */
     private NeighborPeer awaitHandshake() throws Exception{
-		// Receive handshake
+
 		try {
 			// Read in message
 			ByteBuffer buf = ByteBuffer.allocate(32);
@@ -190,9 +236,9 @@ public class PeerConnection extends Thread {
 
 			if (!test.equals(handshake_header)) {
 				// Was not the handshake message
-				logger.error("received invalid handshake from {} (handshake_header = {}, self = {})", this.peer.getID(),
-						test, this.myid);
-                throw new Exception("invalid handshake header");
+				logger.error("received invalid handshake from {} (header = {}, self = {})",
+                                    this.peer.getID(), test, this.myid);
+                                throw new Exception("invalid handshake header");
 			}
 
 			// Get the peer that we're talking to
@@ -201,25 +247,35 @@ public class PeerConnection extends Thread {
 					.getInetAddress().getHostName());
 
 			logger.debug("received handshake from {} (self = {})", peer.getID(), this.myid);
-            return peer;
+                        return peer;
+
 		} catch (Exception e) {
 			logger.error("failed to receive handshake {}", e);
-            throw e;
+                        throw e;
 		}
 	}
 
+    /**
+     * On send event, put the message into the output stream
+     */
     private class SendHandler implements Subscriber<Message> {
         public void onEvent(Event<Message> event) throws IOException {
             event.getSource().to_stream(PeerConnection.this.connection.getOutputStream());
         }
     }
 
+    /**
+     * On close event, close this connection
+     */
     private class CloseHandler implements Subscriber<Void> {
         public void onEvent(Event<Void> event) {
             PeerConnection.this.exitThread();
         }
     }
 
+    /**
+     * Represent message from peer with id
+     */
     public class PeerMessage {
         public final Integer id;
         public final Message msg;
