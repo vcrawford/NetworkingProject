@@ -62,11 +62,16 @@ public class FileHandle {
 		this.numPieces = (Integer) this.fileSize / this.pieceSize;
 		this.myBitField = new BitSet(this.numPieces);
 		this.myBitField.set(0, this.numPieces, hasFile);
+
 		// this.myBitField would contain some extra bits to align it to 4-byte
 		// boundary. Set those bits to true. This is required, otherwise the
 		// toByteArray function in Message.bitfield() is making the all-zero
 		// BitSet to a size 0 BitSet
 		this.myBitField.set(this.numPieces, this.myBitField.size(), true);
+
+                // log, but without extra bits
+                logger.debug("Peer {} has initiated a file handler with bitfield set to {}",
+                    myid, this.printableBitSet(this.myBitField));
 
 		this.peerBitFields = new HashMap<Integer, BitSet>();
 		this.idxBeingRequested = new HashSet<Integer>();
@@ -75,7 +80,8 @@ public class FileHandle {
 		this.lock = new Object();
 		
 		// Random object to generate random index to be requested
-		this.rand = new Random(1337);
+                // seed at id so peers generate different random numbers
+		this.rand = new Random(myid);
 
 		/* Open TheFile.dat */
 		String fileNameWithPath = "peer_" + this.myid.toString() + File.separatorChar + this.fileName;
@@ -114,6 +120,9 @@ public class FileHandle {
 		synchronized (lock) {
 			this.myBitField.set(pieceIndex);
 		}
+
+                logger.debug("Updating bitfield to have received piece {} (self={})",
+	                pieceIndex, this.myid);
 	}
 
 	/**
@@ -125,23 +134,62 @@ public class FileHandle {
 		// Store peer's bit-field
 		this.peerBitFields.put(peerid, peerBitField);
 
+                logger.debug("Storing the bitfield {} of peer {} (self={})",
+                    this.printableBitSet(peerBitField), peerid, this.myid);
+
 		// TODO: Put proper bandwidth score
 		this.bwScores.put(peerid, 0.0);
 	}
+
+        /**
+         * Get neighbor with id peerid's bitfield
+         */
+        public BitSet getBitfield(Integer peerid) {
+
+            return this.peerBitFields.get(peerid);
+
+        }
+
+        /**
+         * Return a BitSet with true at any index where the peer has a piece but
+         * we do not
+         */
+        public BitSet interestingBits(Integer peerid) {
+
+                BitSet neighbor_bits = this.getBitfield(peerid);
+
+                if (neighbor_bits == null) {
+                    // don't have this neighbor's bits
+		    return new BitSet(this.numPieces);
+                }
+
+                BitSet interesting_bits = (BitSet) neighbor_bits.clone();
+
+                // find if they have something we don't
+                neighbor_bits.andNot(this.myBitField);
+
+                return neighbor_bits;
+        }
 
 	/**
 	 * Is called by peer-thread to determine if I am interested in a peer whose bit-field is given as argument
 	 */
 	public boolean checkInterest(Integer peerid) {
-		// TODO: proper implementation
-		return (! this.hasFile);
+
+                // clone peer's bit field so we can do bit operations on it
+                BitSet neighbor_bits = this.interestingBits(peerid);
+
+                logger.debug("Interested in pieces {} from peer {} (self={})",
+                    this.printableBitSet(neighbor_bits), peerid, this.myid);
+
+		return (! neighbor_bits.isEmpty());
 	}
 
 	/**
 	 * Peer-thread calls this function. Function returns a piece-index that will be Peer-thread will request from
-	 * connected peer
+	 * connected peer with id peerid
 	 */
-	public Integer getPieceIndexToReceive() {
+	public Integer getPieceIndexToReceive(Integer peerid) {
 		/*
 		 * Based on bit-field of peer, randomly returns a piece-index that the peer-thread has to request from connected
 		 * peer
@@ -149,23 +197,36 @@ public class FileHandle {
 		// In case the full file have been received, return -1 directly
 		Integer pieceIdx = -1;
 
+                // Find what pieces that this peer has that we are interested in
+                BitSet interesting_bits = this.interestingBits(peerid);
+
+                // Has nothing interesting
+                if (interesting_bits.isEmpty()) return -1;
+
 		synchronized (lock) {
 			/*
 			 * get a random pieceIdx from myBitField that is not yet received also that is not present in
 			 * idxBeingRequested
 			 */
 			while (this.hasFile == false) {
-				Integer randIdx = this.rand.nextInt(this.numPieces);
 
-				// First check if this piece-index is already received
-				if (this.myBitField.get(randIdx) == true)
-					continue;
+                                Integer rand_num = this.rand.nextInt(this.numPieces);
 
-				// Then check if it is already being requested
+                                // Take this random number to a bit that is "interesting"
+                                // One must exist, it's either next or previous
+                                Integer randIdx = interesting_bits.nextSetBit(rand_num);
+                                if (randIdx == -1) {
+                                         // There did not exist a next set bit
+                                         randIdx = interesting_bits.previousSetBit(rand_num);  
+                                }
+
+				// Check if index is already being requested
 				if (this.idxBeingRequested.contains(randIdx) == false) {
 					pieceIdx = randIdx;
 					break;
 				}
+
+                                logger.debug("Peer {} will request piece {} from {}", this.myid, randIdx, peerid);
 			}
 
 			if (pieceIdx != -1) {
@@ -281,5 +342,12 @@ public class FileHandle {
 
     public Integer maxPiece() {
         return numPieces;
+    }
+
+    /**
+     * For printing bits without the end bits
+     */
+    public String printableBitSet(BitSet bits) {
+        return bits.get(0, this.numPieces).toString();
     }
 }

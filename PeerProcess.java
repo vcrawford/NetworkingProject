@@ -141,7 +141,7 @@ public class PeerProcess {
 			}
 		}
 
-		logger.debug("done connecting to peers");
+		logger.debug("{} is done initiating connections to peers with lower id", this.myid);
 	}
 
 	/**
@@ -293,19 +293,14 @@ public class PeerProcess {
     private class ConnectedHandler implements Subscriber<NeighborPeer> {
         public void onEvent(Event<NeighborPeer> event) {
 
-            // Add this to our neighbors
-            neighbors.put(event.getSource().getID(), event.getSource());
-
-            // Initial status is choked
-            neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
-
-            logger.info("Connection event with new neighbor {} (self={}). Added to neighbors.",
-                event.getSource().getID(), PeerProcess.this.myid);
-
             // new connection, we need to send this peer our bitfield
             message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
 
-            logger.info("Sent {} bitfield (self={}).", event.getSource().getID(), PeerProcess.this.myid);
+            logger.info("Sent {} bitfield {} (self={}).", event.getSource().getID(),
+                PeerProcess.this.fH.printableBitSet(PeerProcess.this.fH.getBitfield()), PeerProcess.this.myid);
+
+           // Since this is a new neighbor, we should make sure it is set as choked
+	   neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
         }
     }
 
@@ -318,25 +313,26 @@ public class PeerProcess {
             // Get peer's bitfield
             BitSet peerBitfield = ((Message.BitfieldPayload)event.getSource().msg.getPayload()).bitfield;
 
+            logger.info("Received bitfield {} from {} (self = {}).",
+                PeerProcess.this.fH.printableBitSet(peerBitfield), event.getSource().id,
+                PeerProcess.this.myid);
+
             // Record the peer's bitfield
             PeerProcess.this.fH.setBitfield(event.getSource().id, peerBitfield);
-
-            logger.info("Bitfield receipt event from {} (self = {}). Recorded bitfield.",
-                event.getSource().id, PeerProcess.this.myid);
 
             if(PeerProcess.this.fH.checkInterest(event.getSource().id)) {
 
                 // We are interested in this bitfield
                 message(event.getSource().id, Message.empty(Message.Type.Interested));
 
-                logger.info("Interested in bitfield from {} (self = {}). Recorded bitfield.",
+                logger.info("Interested in bitfield from {} (self = {}).",
                     event.getSource().id, PeerProcess.this.myid);
             } else {
 
                 // Not interested
                 message(event.getSource().id, Message.empty(Message.Type.NotInterested));
 
-                logger.info("Not interested in bitfield from {} (self = {}). Recorded bitfield.",
+                logger.info("Not interested in bitfield from {} (self = {}).",
                     event.getSource().id, PeerProcess.this.myid);
             }
         }
@@ -353,7 +349,7 @@ public class PeerProcess {
 
             // TODO: cancel request timer
 
-            logger.info("Choked by {} (self = {}).", event.getSource().id, PeerProcess.this.myid);
+            //logger.info("Choked by {} (self = {}).", event.getSource().id, PeerProcess.this.myid);
         }
     }
 
@@ -362,13 +358,13 @@ public class PeerProcess {
      */
     private void requestPiece(int peer) {
 
-        // which piece we want to request
-        Integer idx = fH.getPieceIndexToReceive();
+        // which piece we want to request from this peer
+        Integer idx = fH.getPieceIndexToReceive(peer);
 
         if(idx < 0) {
 
-            // don't need any more pieces
-            logger.info("Not requesting any pieces, done with file (self = {})", this.myid);
+            // don't need pieces from this peer (or at all)
+            logger.info("Not requesting any pieces from {} (self = {})", peer, this.myid);
         } else {
 
             // request piece
@@ -385,13 +381,15 @@ public class PeerProcess {
     private class UnchokeHandler implements Subscriber<PeerConnection.PeerMessage> {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
 
-            // Change status of peer
+            // Change status of self wrt peer
             selfStatus.put(event.getSource().id, PeerStatus.Unchoked);
+
+            logger.info("Received unchoke message from {} (self = {})",
+                event.getSource().id, PeerProcess.this.myid);
 
             // Now that we are unchoked, request a piece of the file
             requestPiece(event.getSource().id);
 
-            logger.info("received unchoke message from {} (self = {})", event.getSource().id, PeerProcess.this.myid);
         }
     }
 
@@ -465,16 +463,13 @@ public class PeerProcess {
             if(neighborStat == PeerStatus.Unchoked) {
                 requestPiece(event.getSource().id);   
             }
-        }
-    }
+        } }
 
     /**
      * Deal with time to update preferred neighbors
      */
     private class UnchokeIntervalHandler implements Subscriber<Boolean> {
         public void onEvent(Event<Boolean> ignored) {
-
-            logger.info("updating choke/unchoke settings (self = {})", PeerProcess.this.myid);
 
             // All our peer ids
             ArrayList<Integer> peers = new ArrayList<Integer>(neighbors.keySet());
@@ -511,12 +506,11 @@ public class PeerProcess {
                 // have them as unchoked now
                 neighborStatus.put(peers.get(i), PeerStatus.Unchoked);
 
-                logger.info("Peer {} is unchoked (self = {})", peers.get(i), PeerProcess.this.myid);
-
                 // only send them an unchoke message if they were previously unchoked
                 if(old.equals(PeerStatus.Choked)) {
                     message(peers.get(i), Message.empty(Message.Type.Unchoke));
-                    logger.info("Send unchoke message to {} (self = {})", peers.get(i), PeerProcess.this.myid);
+                    logger.info("Added {} to preferred neighbors (self = {})",
+                        peers.get(i), PeerProcess.this.myid);
                 }
             }
 
@@ -530,16 +524,15 @@ public class PeerProcess {
                 if(!old.equals(PeerStatus.Optimistic)) {
 
                     neighborStatus.put(peers.get(i), PeerStatus.Choked);
-
-                    logger.info("Peer {} is choked (self = {})", peers.get(i), PeerProcess.this.myid);
                 }
 
                 // send choked message if it wasn't choked already 
                 if(old.equals(PeerStatus.Unchoked)) {
                     message(peers.get(i), Message.empty(Message.Type.Choke));
-                    logger.info("Send choke message to {} (self = {})", peers.get(i), PeerProcess.this.myid);
+                    logger.info("Removed {} from preferred neighbors (self = {})", peers.get(i), PeerProcess.this.myid);
                 }
             }
+
         }
     }
 
@@ -550,10 +543,12 @@ public class PeerProcess {
 
     private void registerTimers() {
         this.chokeTimer = new Timer("choke/unchoke");
-        this.chokeTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/unchoke"), true), 0, this.UnchokingInterval * 1000);
+        this.chokeTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/unchoke"), true),
+            0, this.UnchokingInterval * 1000);
 
         this.optimisticTimer = new Timer("optimistic");
-        this.optimisticTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/optimistic"), true), 0, this.OptimisticUnchokingInterval * 1000);
+        this.optimisticTimer.scheduleAtFixedRate(new MessageTask<Boolean>(topic("interval/optimistic"), true),
+            0, this.OptimisticUnchokingInterval * 1000);
     }
 
     private static class MessageTask<T> extends TimerTask {
