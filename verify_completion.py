@@ -15,8 +15,9 @@ for peer_dir in dir:
         if np_buffer.shape[0] != file_size:
             print('File size mismatch. Expected: %d found: %d' % (file_size, np_buffer.shape[0]))
         
-        match = np.all(np_buffer == val)
-        print('Client %s match: ' %  peer_dir, match)
+        match = (np_buffer == val)
+        percentage = 100 * match.sum() / float(match.shape[0])
+        print('Client %s match: %.1f' %  (peer_dir, percentage), '%')
     else:
         print('Client %s match: ' %  peer_dir, 'File %s not found' % file)
     
