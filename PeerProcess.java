@@ -6,6 +6,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.Random;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -458,7 +459,13 @@ public class PeerProcess {
             payload.content.get(content);
 
             // Write it to our file
-            fH.writePiece(payload.index, content);
+            Boolean needMore = fH.writePiece(payload.index, content);
+            
+            // Set hasFile flag so that Preferred nbrs are chosen randomly in next Unchoke interval
+            if (needMore == false){
+            	PeerProcess.this.hasFile = true;
+                logger.info("Peer {} has downloaded the complete file.", PeerProcess.this.myid);
+        	}
             
             // Increment the volume score
             neighborVolume.put(event.getSource().id, neighborVolume.get(event.getSource().id) + 1); 
@@ -493,18 +500,24 @@ public class PeerProcess {
             // file pieces at the top
             Collections.sort(peers, new Comparator<Integer>() {
                     public int compare(Integer a, Integer b) {
-                        Integer vola = neighborVolume.get(a);
-                        Integer volb = neighborVolume.get(b);
-
-                        if (vola == null) {
-                            vola = 0;
-                        }
-
-                        if (volb == null) {
-                            volb = 0;
-                        }
-                        
-                        return volb - vola;
+                    	if (PeerProcess.this.hasFile == true){
+                    		// return one of {-1, +1) randomly
+            				return (new Random().nextBoolean()) ? -1 : +1;
+                    	}
+                    	else{
+	                        Integer vola = neighborVolume.get(a);
+	                        Integer volb = neighborVolume.get(b);
+	
+	                        if (vola == null) {
+	                            vola = 0;
+	                        }
+	
+	                        if (volb == null) {
+	                            volb = 0;
+	                        }
+	                        
+	                        return volb - vola;
+                    	}
                     }
                 });
             
