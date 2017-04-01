@@ -66,6 +66,9 @@ public class PeerProcess {
         Choked, Unchoked, Optimistic;
     }
 
+    // For choosing optimistically unchoked neighbor
+    Random rand;
+
 	/**
 	 * Main function: Starting point
 	 */
@@ -115,6 +118,8 @@ public class PeerProcess {
 
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
+
+                this.rand = new Random(id);
 	}
 
 
@@ -275,6 +280,7 @@ public class PeerProcess {
     private void registerHandlers() {
         dispatcher.subscribe(topic("connected"), NeighborPeer.class, new ConnectedHandler());
         dispatcher.subscribe(topic("interval/unchoke"), Boolean.class, new UnchokeIntervalHandler());
+        dispatcher.subscribe(topic("interval/optimistic"), Boolean.class, new OptimisticIntervalHandler());
 
         // message receipt
         dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
@@ -471,6 +477,10 @@ public class PeerProcess {
     private class UnchokeIntervalHandler implements Subscriber<Boolean> {
         public void onEvent(Event<Boolean> ignored) {
 
+            logger.info("Unchoking interval. Finding preferred neighbors (self = {})",
+                PeerProcess.this.myid);
+
+
             // All our peer ids
             ArrayList<Integer> peers = new ArrayList<Integer>(neighbors.keySet());
 
@@ -535,6 +545,37 @@ public class PeerProcess {
 
         }
     }
+
+    /**
+     * Deal with time to update optimistically unchoked neighbor
+     * TODO: Need to only choose neighbor that is interested in our pieces
+     */
+    private class OptimisticIntervalHandler implements Subscriber<Boolean> {
+        public void onEvent(Event<Boolean> ignored) {
+
+            // Make sure there exists a choked neighbor
+            if (neighborStatus.containsValue(PeerStatus.Choked)) {
+
+                // Randomly pick a neighbor that is choked and interested in our data
+                Integer[] neighids = new Integer[neighborStatus.size()];
+                System.arraycopy(neighborStatus.keySet().toArray(), 0, neighids, 0, neighborStatus.size());
+
+                int randint = rand.nextInt(neighids.length);
+                
+                while (neighborStatus.get(neighids[randint]) == PeerStatus.Unchoked) {
+                    randint = rand.nextInt(neighids.length);
+                }
+
+                // Send unchoke message to the opportunistically unchoked neighbor
+                message(neighids[randint], Message.empty(Message.Type.Unchoke));
+                logger.info("Optimistic neighbor {} chosen (self={})", neighids[randint], myid);
+
+            }
+
+
+        }
+    }
+
 
     // send a message to peer id
     private static void message(int id, Message msg) {
