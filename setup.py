@@ -1,6 +1,7 @@
 import os, shutil
 from ctypes import c_byte
 
+val = 50  # Just any non-zero value
 file_size = 10000232 #bytes
 file_name = ('TheFile.dat')
 
@@ -17,9 +18,8 @@ for dirname in dir:
         os.mkdir(dirname)           
 
 # Placing file inside first client i.e. 1001      
-val = 50  # Just any non-zero value
-if not os.path.exists(file_name):
-    file = os.path.join(dir[0], file_name)
-    buffer = (c_byte * file_size) (*[val] * file_size)
-    open(file, 'wb').write(buffer)
+
+file = os.path.join(dir[0], file_name)
+buffer = (c_byte * file_size) (*[val] * file_size)
+open(file, 'wb').write(buffer)
     
