@@ -59,7 +59,7 @@ public class FileHandle {
 		this.pieceSize = pieceSize;
 
 		// Set bit-field. All bits should be True or False
-		this.numPieces = (Integer) this.fileSize / this.pieceSize;
+		this.numPieces = (int) Math.ceil(this.fileSize / (double)this.pieceSize);
 		this.myBitField = new BitSet(this.numPieces);
 		this.myBitField.set(0, this.numPieces, hasFile);
 
