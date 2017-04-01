@@ -292,6 +292,8 @@ public class PeerProcess {
      */
     private class ConnectedHandler implements Subscriber<NeighborPeer> {
         public void onEvent(Event<NeighborPeer> event) {
+        	//Initialize volume score
+        	neighborVolume.put(event.getSource().getID(), 0);
 
             // new connection, we need to send this peer our bitfield
             message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
@@ -451,6 +453,9 @@ public class PeerProcess {
 
             // Write it to our file
             fH.writePiece(payload.index, content);
+            
+            // Increment the volume score
+            neighborVolume.put(event.getSource().id, neighborVolume.get(event.getSource().id) + 1); 
 
             // TODO: have?
             // Find are they choked or not
@@ -492,8 +497,12 @@ public class PeerProcess {
                         return volb - vola;
                     }
                 });
-
-
+            
+            //Reset volume score
+            for (Integer key : neighborVolume.keySet()){
+            	neighborVolume.put(key, 0);
+            }
+            
             // Send choke and unchoke messages
             int i = 0;
             // Go through top ones that will be preferred neighbors and
@@ -532,7 +541,6 @@ public class PeerProcess {
                     logger.info("Removed {} from preferred neighbors (self = {})", peers.get(i), PeerProcess.this.myid);
                 }
             }
-
         }
     }
 
