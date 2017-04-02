@@ -56,6 +56,10 @@ public class PeerProcess {
     // Status of neighbors (Choked, Unchoked, or Optimistic)
     private HashMap<Integer, PeerStatus> neighborStatus = new HashMap<Integer, PeerStatus>();
 
+    // Status of neighbors as far as interested in this peers file pieces
+    private HashMap<Integer, PeerInterestedStatus> neighborInterestedStatus = new HashMap<Integer,
+        PeerInterestedStatus>();
+
     // Status of self that the neighbor has (same statuses as above) 
     private HashMap<Integer, PeerStatus> selfStatus = new HashMap<Integer, PeerStatus>();
 
@@ -64,6 +68,10 @@ public class PeerProcess {
 
     private enum PeerStatus {
         Choked, Unchoked, Optimistic;
+    }
+
+    private enum PeerInterestedStatus {
+        Interested, NotInterested;
     }
 
     // For choosing optimistically unchoked neighbor
@@ -119,7 +127,7 @@ public class PeerProcess {
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
 
-                this.rand = new Random(id);
+                this.rand = new Random(System.currentTimeMillis());
 	}
 
 
@@ -180,6 +188,9 @@ public class PeerProcess {
 						this.neighbors.put(id, nbr);
                                                 // All neighbors start out as choked
 						this.neighborStatus.put(id, PeerStatus.Choked);
+                                                // and uninterested
+						this.neighborInterestedStatus.put(id,
+                                                    PeerInterestedStatus.NotInterested);
 						if (id > this.myid) {
 							this.num_wait++;
 						}
@@ -286,6 +297,10 @@ public class PeerProcess {
         dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
         dispatcher.subscribe(topic("recv/choke"), PeerConnection.PeerMessage.class, new ChokeHandler());
         dispatcher.subscribe(topic("recv/unchoke"), PeerConnection.PeerMessage.class, new UnchokeHandler());
+        dispatcher.subscribe(topic("recv/interested"), PeerConnection.PeerMessage.class,
+            new InterestedHandler());
+        dispatcher.subscribe(topic("recv/not-interested"), PeerConnection.PeerMessage.class,
+            new NotInterestedHandler());
         dispatcher.subscribe(topic("recv/request"), PeerConnection.PeerMessage.class, new RequestHandler());
         dispatcher.subscribe(topic("recv/piece"), PeerConnection.PeerMessage.class, new PieceHandler());
 
@@ -393,13 +408,41 @@ public class PeerProcess {
             selfStatus.put(event.getSource().id, PeerStatus.Unchoked);
 
             logger.info("Received unchoke message from {} (self = {})",
-                event.getSource().id, PeerProcess.this.myid);
+                event.getSource().id, myid);
 
             // Now that we are unchoked, request a piece of the file
             requestPiece(event.getSource().id);
 
         }
     }
+
+    /**
+     * Deal with interested message from a peer
+     */
+    private class InterestedHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+
+            neighborInterestedStatus.put(event.getSource().id,
+                PeerInterestedStatus.Interested);
+            logger.info("Peer {} received the 'interested' message from {}",
+                myid, event.getSource().id);
+        }
+    }
+
+    /**
+     * Deal with not-interested message from a peer
+     */
+    private class NotInterestedHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+
+            neighborInterestedStatus.put(event.getSource().id,
+                PeerInterestedStatus.NotInterested);
+            logger.info("Peer {} received the 'not interested' message from {}",
+                myid, event.getSource().id);
+
+        }
+    }
+
 
     /**
      * Deal with a piece request from a peer
@@ -551,6 +594,7 @@ public class PeerProcess {
                     logger.info("Removed {} from preferred neighbors (self = {})", peers.get(i), PeerProcess.this.myid);
                 }
             }
+
         }
     }
 
@@ -561,29 +605,51 @@ public class PeerProcess {
     private class OptimisticIntervalHandler implements Subscriber<Boolean> {
         public void onEvent(Event<Boolean> ignored) {
 
-            // Make sure there exists a choked neighbor
-            if (neighborStatus.containsValue(PeerStatus.Choked)) {
+            logger.info("Optimistic interval. Finding optimistic neighbor (self={})", myid);
 
-                // Randomly pick a neighbor that is choked and interested in our data
-                Integer[] neighids = new Integer[neighborStatus.size()];
-                System.arraycopy(neighborStatus.keySet().toArray(), 0, neighids, 0, neighborStatus.size());
+            // All neighbor ids
+            Set<Integer> n_ids = neighbors.keySet();
+            Iterator<Integer> n_ids_it = n_ids.iterator();
 
-                int randint = rand.nextInt(neighids.length);
-                
-                while (neighborStatus.get(neighids[randint]) == PeerStatus.Unchoked) {
-                    randint = rand.nextInt(neighids.length);
+            // Find potential optimistic neighbors, ones that are choked and interested
+            ArrayList<Integer> potential = new ArrayList<Integer>();
+            Integer n_id;
+
+            while (n_ids_it.hasNext()) {
+
+                n_id = n_ids_it.next();
+
+                // Unset previous optimistic neighbor
+                if (neighborStatus.get(n_id) == PeerStatus.Optimistic) {
+                    neighborStatus.put(n_id, PeerStatus.Choked);
+	            message(n_id, Message.empty(Message.Type.Choke));
+	            logger.info("Choked previous optimistic neighbor {} (self={})",
+                        n_id, myid);
                 }
 
-                // Send unchoke message to the opportunistically unchoked neighbor
-                message(neighids[randint], Message.empty(Message.Type.Unchoke));
-                logger.info("Optimistic neighbor {} chosen (self={})", neighids[randint], myid);
-
+                if ((neighborStatus.get(n_id) == PeerStatus.Choked)&&
+                    (neighborInterestedStatus.get(n_id) == PeerInterestedStatus.Interested)) {
+                    // This neighbor is choked and interested
+                    potential.add(n_id);
+                }
             }
 
+            // If possible, pick a random optimistic peer
+            if (potential.size() > 0) {
+               
+	        int randint = rand.nextInt(potential.size());
+	        // Send unchoke message to the opportunistically unchoked neighbor
+	        message(potential.get(randint), Message.empty(Message.Type.Unchoke));
+                neighborStatus.put(potential.get(randint), PeerStatus.Optimistic);
+	        logger.info("Optimistic neighbor {} chosen (self={})", potential.get(randint), myid);
+
+	    }
+            else {
+	        logger.info("No optimistic neighbor chosen (self={})", myid);
+            }
 
         }
     }
-
 
     // send a message to peer id
     private static void message(int id, Message msg) {
