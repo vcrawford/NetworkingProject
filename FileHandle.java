@@ -63,9 +63,9 @@ public class FileHandle {
 		this.myBitField = new BitSet(this.numPieces);
 		this.myBitField.set(0, this.numPieces, hasFile);
 
-		// this.myBitField would contain some extra bits to align it to 4-byte
-		// boundary. Set those bits to true. This is required, otherwise the
-		// toByteArray function in Message.bitfield() is making the all-zero
+		// this.myBitField would contain some extra bits to align it to 4 or 
+		// 8-byte boundary. Set those bits to true. This is required, otherwise
+		// the toByteArray function in Message.bitfield() is making the all-zero
 		// BitSet to a size 0 BitSet
 		this.myBitField.set(this.numPieces, this.myBitField.size(), true);
 
@@ -114,17 +114,28 @@ public class FileHandle {
 	 * Whenever I receive a piece from peer, I update my own bit-field with this newly
 	 * received piece
 	 */
-	private void updateBitfield(Integer pieceIndex) {
+	private Boolean updateBitfield(Integer pieceIndex) {
 		// Set the bit at pieceIndex to True
 		// lock the file handle
 		synchronized (lock) {
 			this.myBitField.set(pieceIndex);
 		}
 
-                logger.debug("Updating bitfield to have received piece {} (self={})",
-	                pieceIndex, this.myid);
+		logger.debug("Updating bitfield to have received piece {} (self={})",
+		    pieceIndex, this.myid);
+		
+		return checkAvailability();
 	}
 
+
+	/**
+	 * Returns True if I still need more pieces. Returns False otherwise
+	 */
+	private Boolean checkAvailability() {
+		Boolean needMore = (this.myBitField.nextClearBit(0) < this.numPieces); 
+		return needMore;
+	}
+	
 	/**
 	 * Peer-thread calls this function. I am supposed to have bit-fields of each peer I am connected to. Whenever
 	 * Peer-thread receives a complete bit-field from peer, it calls this function to store peer's bit-field. This would
@@ -261,15 +272,15 @@ public class FileHandle {
 	 *            Length of piece. For the last pieceIdx this parameter should specify the length of valid bytes inside
 	 *            piece
 	 */
-	public void writePiece(Integer pieceIdx, byte[] piece) {
+	public Boolean writePiece(Integer pieceIdx, byte[] piece) {
 		try {
             if(piece.length <= 0) {
                 logger.error("Cannot write 0-length piece at index {}", pieceIdx);
-                return;
+                return checkAvailability();
             }
             if(pieceIdx * this.pieceSize + piece.length > f.length()) {
                 logger.error("Cannot write piece {}, {} bytes is too large", pieceIdx, piece.length);
-                return;
+                return checkAvailability();
             }
             f.seek(pieceIdx * this.pieceSize);
             f.write(piece);
@@ -280,6 +291,7 @@ public class FileHandle {
 		
 		// Add this piece to my bit-field
 		this.updateBitfield(pieceIdx);
+		return checkAvailability();
 	}
 
 	/**
