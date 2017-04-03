@@ -304,6 +304,7 @@ public class PeerProcess {
             new NotInterestedHandler());
         dispatcher.subscribe(topic("recv/request"), PeerConnection.PeerMessage.class, new RequestHandler());
         dispatcher.subscribe(topic("recv/piece"), PeerConnection.PeerMessage.class, new PieceHandler());
+        dispatcher.subscribe(topic("recv/have"), PeerConnection.PeerMessage.class, new HaveHandler());
 
         logger.info("Message handlers for peer {} have been registered.", this.myid);
     }
@@ -321,7 +322,7 @@ public class PeerProcess {
             message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
 
             logger.info("Sent {} bitfield {} (self={}).", event.getSource().getID(),
-                PeerProcess.this.fH.printableBitSet(PeerProcess.this.fH.getBitfield()), PeerProcess.this.myid);
+                fH.printableBitSet(fH.getBitfield()), PeerProcess.this.myid);
 
            // Since this is a new neighbor, we should make sure it is set as choked
 	   neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
@@ -373,7 +374,7 @@ public class PeerProcess {
 
             // TODO: cancel request timer
 
-            //logger.info("Choked by {} (self = {}).", event.getSource().id, PeerProcess.this.myid);
+            logger.info("Choked by {} (self = {}).", event.getSource().id, myid);
         }
     }
 
@@ -453,7 +454,7 @@ public class PeerProcess {
 
             // Which piece did they request
             Integer idx = ((Message.IndexPayload)event.getSource().msg.getPayload()).index;
-            logger.info("received request message for {} from {} (self = {})", idx, 
+            logger.info("Received request message for {} from {} (self = {})", idx, 
                 event.getSource().id, PeerProcess.this.myid);
 
             if(neighborStatus.get(event.getSource().id) == PeerStatus.Choked) {
@@ -481,7 +482,8 @@ public class PeerProcess {
 
                     // Send it
                     message(event.getSource().id, Message.piece(idx, piece));
-
+                    logger.info("Send piece {} to {} (self = {})", idx, 
+                        event.getSource().id, PeerProcess.this.myid);
                 }
             }
         }
@@ -493,17 +495,27 @@ public class PeerProcess {
     private class PieceHandler implements Subscriber<PeerConnection.PeerMessage> {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
 
-            logger.info("received piece message from {} (self = {})", event.getSource().id, 
-                PeerProcess.this.myid);
-
             // Get the piece out of the message
             Message.PiecePayload payload = ((Message.PiecePayload)event.getSource().msg.getPayload());
             byte[] content = new byte[payload.length];
             payload.content.get(content);
 
+            logger.info("Received piece {} from {} (self = {})", payload.index, event.getSource().id, myid);
+
             // Write it to our file
             Boolean needMore = fH.writePiece(payload.index, content);
-            
+
+            logger.info("Current bitfield is {} (self={})", fH.printableBitSet(fH.getBitfield()), myid);
+
+            // Send out have message to all peers
+            logger.info("Sending have piece {} message to all peers (self={})", payload.index, myid);
+
+            Integer[] peerids = neighbors.keySet().toArray(new Integer[neighbors.size()]);
+                       
+            for (int i = 0; i < peerids.length; i++) { 
+               message(peerids[i], Message.index(Message.Type.Have, payload.index));
+            }
+
             // Set hasFile flag so that Preferred nbrs are chosen randomly in next Unchoke interval
             if (needMore == false){
             	PeerProcess.this.hasFile = true;
@@ -513,7 +525,6 @@ public class PeerProcess {
             // Increment the volume score
             neighborVolume.put(event.getSource().id, neighborVolume.get(event.getSource().id) + 1); 
 
-            // TODO: have?
             // Find are they choked or not
             PeerStatus neighborStat = selfStatus.get(event.getSource().id);
 
@@ -524,7 +535,31 @@ public class PeerProcess {
             if(neighborStat == PeerStatus.Unchoked) {
                 requestPiece(event.getSource().id);   
             }
-        } }
+        }
+    }
+
+    /**
+     * A peer has received a new piece
+     */
+    private class HaveHandler implements Subscriber<PeerConnection.PeerMessage> {
+        public void onEvent(Event<PeerConnection.PeerMessage> event) {
+
+            // Get which piece out of the message
+            Integer idx = ((Message.IndexPayload)event.getSource().msg.getPayload()).index;
+            logger.info("Neighbor {} has piece {} (self = {})", event.getSource().id, idx, myid);
+
+            fH.updateHasPiece(event.getSource().id, idx);
+
+            // See if we are now interested in this neighbor
+            if (fH.interestedInPiece(idx)) {
+                message(event.getSource().id, Message.empty(Message.Type.Interested));
+                logger.info("Interested in the pieces of neighbor {} (self={})",
+                    event.getSource().id, myid);
+            }
+            
+        }
+    }
+
 
     /**
      * Deal with time to update preferred neighbors

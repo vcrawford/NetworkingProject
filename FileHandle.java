@@ -153,6 +153,27 @@ public class FileHandle {
 	}
 
         /**
+         * Update whether a peer has a certain piece (when received have message)
+         */
+        public void updateHasPiece(Integer peerid, Integer piece) {
+
+            BitSet peer_bits = this.peerBitFields.get(peerid);
+            peer_bits.set(piece);
+            logger.debug("Peer {} has been updated to have bit set {}.", peerid,
+                printableBitSet(peer_bits));
+
+        }
+
+        /**
+         * Check whether this peer is interested in that piece
+         */
+        public boolean interestedInPiece(Integer piece) {
+
+            return !this.myBitField.get(piece);
+
+        }
+
+        /**
          * Get neighbor with id peerid's bitfield
          */
         public BitSet getBitfield(Integer peerid) {

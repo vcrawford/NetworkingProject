@@ -115,6 +115,7 @@ class Message {
             case NotInterested:
                 return new NoPayload();
             case Have:
+                return new IndexPayload(this.payload);
             case Request:
                 return new IndexPayload(this.payload);
             case Bitfield:
