@@ -9,5 +9,3 @@ sleep 1
 java -Dcolor -Dpeerid=1005 -jar build/libs/NetworkingProject-all.jar 1005 &
 sleep 1
 java -Dcolor -Dpeerid=1006 -jar build/libs/NetworkingProject-all.jar 1006
-
-pkill -P $$

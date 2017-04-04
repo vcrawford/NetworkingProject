@@ -135,7 +135,7 @@ public class PeerConnection extends Thread {
 
             // Listen for when we need to close this connection
             PeerProcess.dispatcher.subscribe(topic(String.format("peer/%d/close", this.peer.getID())),
-                Void.class, new CloseHandler());
+                Boolean.class, new CloseHandler());
 
             // Send out connection notification
             PeerProcess.dispatcher.publish(topic("connected"), this.peer);
@@ -146,58 +146,61 @@ public class PeerConnection extends Thread {
 	    logger.debug("Peer {} thread enters send/receive loop (self={})",
                 this.peer.getID(), this.myid);
 
-	    while(true) {
+	    while(!connection.isClosed()) {
 
 		Message msg;
 
 		try {
-                     // Receive incoming message
-		     msg = Message.from_stream(this.connection.getInputStream());
-
+            // Receive incoming message
+            msg = Message.from_stream(this.connection.getInputStream());
 		} catch(Exception e) {
 		    PeerProcess.dispatcher.publish(topic("recv/error"), e);
 		    continue;
 		}
 
                 // Take action according to message type
-		switch (msg.type) {
-		    case Choke:
-			PeerProcess.dispatcher.publish(topic("recv/choke"), peer(msg));
-			break;
-		    case Unchoke:
-			PeerProcess.dispatcher.publish(topic("recv/unchoke"), peer(msg));
-			break;
-		    case Interested:
-			PeerProcess.dispatcher.publish(topic("recv/interested"), peer(msg));
-			break;
-		    case NotInterested:
-			PeerProcess.dispatcher.publish(topic("recv/not-interested"), peer(msg));
-			break;
-		    case Have:
-			PeerProcess.dispatcher.publish(topic("recv/have"), peer(msg));
-			break;
-		    case Bitfield:
-			PeerProcess.dispatcher.publish(topic("recv/bitfield"), peer(msg));
-			break;
-		    case Request:
-			PeerProcess.dispatcher.publish(topic("recv/request"), peer(msg));
-			break;
-		    case Piece:
-			PeerProcess.dispatcher.publish(topic("recv/piece"), peer(msg));
-			break;
-		    default:
-			PeerProcess.dispatcher.publish(topic("recv/malformed"), peer(msg));
-			break;
-		}
+        switch (msg.type) {
+            case Choke:
+                PeerProcess.dispatcher.publish(topic("recv/choke"), peer(msg));
+                break;
+            case Unchoke:
+                PeerProcess.dispatcher.publish(topic("recv/unchoke"), peer(msg));
+                break;
+            case Interested:
+                PeerProcess.dispatcher.publish(topic("recv/interested"), peer(msg));
+                break;
+            case NotInterested:
+                PeerProcess.dispatcher.publish(topic("recv/not-interested"), peer(msg));
+                break;
+            case Have:
+                PeerProcess.dispatcher.publish(topic("recv/have"), peer(msg));
+                break;
+            case Bitfield:
+                PeerProcess.dispatcher.publish(topic("recv/bitfield"), peer(msg));
+                break;
+            case Request:
+                PeerProcess.dispatcher.publish(topic("recv/request"), peer(msg));
+                break;
+            case Piece:
+                PeerProcess.dispatcher.publish(topic("recv/piece"), peer(msg));
+                break;
+            default:
+                PeerProcess.dispatcher.publish(topic("recv/malformed"), peer(msg));
+                break;
+        }
 	    }
 	}
 
 	/**
 	 * Function to print that thread is exiting 
 	 */
-	private void exitThread(){
+	private void exitThread() {
 		logger.debug("closing connection thread (peer = {}, self = {})", this.peer.getID(), this.myid);
-		System.exit(0);
+        try {
+            connection.close();
+        } catch(Exception e) {
+            logger.error("closing connection failed (peer = {}, self = {})", peer.getID(), myid);
+        }
 	}
 
 
@@ -267,8 +270,8 @@ public class PeerConnection extends Thread {
     /**
      * On close event, close this connection
      */
-    private class CloseHandler implements Subscriber<Void> {
-        public void onEvent(Event<Void> event) {
+    private class CloseHandler implements Subscriber<Boolean> {
+        public void onEvent(Event<Boolean> event) {
             PeerConnection.this.exitThread();
         }
     }

@@ -293,6 +293,7 @@ public class PeerProcess {
         dispatcher.subscribe(topic("connected"), NeighborPeer.class, new ConnectedHandler());
         dispatcher.subscribe(topic("interval/unchoke"), Boolean.class, new UnchokeIntervalHandler());
         dispatcher.subscribe(topic("interval/optimistic"), Boolean.class, new OptimisticIntervalHandler());
+        dispatcher.subscribe(topic("complete"), Boolean.class, new CompleteHandler());
 
         // message receipt
         dispatcher.subscribe(topic("recv/bitfield"), PeerConnection.PeerMessage.class, new BitfieldHandler());
@@ -375,6 +376,7 @@ public class PeerProcess {
             // TODO: cancel request timer
 
             logger.info("Choked by {} (self = {}).", event.getSource().id, myid);
+            fH.cancelPieceIndexRequest(event.getSource().id);
         }
     }
 
@@ -520,6 +522,10 @@ public class PeerProcess {
             if (needMore == false){
             	PeerProcess.this.hasFile = true;
                 logger.info("Peer {} has downloaded the complete file.", PeerProcess.this.myid);
+
+                if(fH.allComplete()) {
+                    PeerProcess.dispatcher.publish(topic("complete"), true);
+                }
         	}
             
             // Increment the volume score
@@ -549,6 +555,9 @@ public class PeerProcess {
             logger.info("Neighbor {} has piece {} (self = {})", event.getSource().id, idx, myid);
 
             fH.updateHasPiece(event.getSource().id, idx);
+            if(fH.allComplete()) {
+                PeerProcess.dispatcher.publish(topic("complete"), true);
+            }
 
             // See if we are now interested in this neighbor
             if (fH.interestedInPiece(idx)) {
@@ -567,8 +576,12 @@ public class PeerProcess {
     private class UnchokeIntervalHandler implements Subscriber<Boolean> {
         public void onEvent(Event<Boolean> ignored) {
 
-            logger.info("Unchoking interval. Finding preferred neighbors (self = {})",
-                PeerProcess.this.myid);
+            logger.info("Unchoking interval. Missing {} pieces. Finding preferred neighbors (self = {})",
+                fH.getNumMissing(), PeerProcess.this.myid);
+
+            if(fH.allComplete()) {
+                logger.info("all complete; some state transition was missed (self = {})", myid);
+            }
 
 
             // All our peer ids
@@ -696,6 +709,20 @@ public class PeerProcess {
 	        logger.info("No optimistic neighbor chosen (self={})", myid);
             }
 
+        }
+    }
+
+    /**
+     * A peer has received a new piece
+     */
+    private class CompleteHandler implements Subscriber<Boolean> {
+        public void onEvent(Event<Boolean> event) throws Exception {
+            logger.info("all done, shutting down (self = {})", myid);
+            for(Integer peer : neighbors.keySet()) {
+                PeerProcess.dispatcher.publish(topic(String.format("peer/%d/close", peer)), true);
+            }
+            fH.close();
+            System.exit(0);
         }
     }
 
