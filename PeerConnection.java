@@ -158,6 +158,10 @@ public class PeerConnection extends Thread {
 		    continue;
 		}
 
+        if(msg == null) {
+            continue;
+        }
+
                 // Take action according to message type
         switch (msg.type) {
             case Choke:
@@ -263,7 +267,11 @@ public class PeerConnection extends Thread {
      */
     private class SendHandler implements Subscriber<Message> {
         public void onEvent(Event<Message> event) throws IOException {
-            event.getSource().to_stream(PeerConnection.this.connection.getOutputStream());
+            if(!connection.isClosed()) {
+                event.getSource().to_stream(PeerConnection.this.connection.getOutputStream());
+            } else {
+                logger.error("attempted to send to dead peer {} (self = {})", peer.getID(), myid);
+            }
         }
     }
 

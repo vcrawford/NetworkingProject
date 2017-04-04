@@ -50,7 +50,11 @@ class Message {
 
         // Read in the header
         ByteBuffer buf = ByteBuffer.allocate(HEADER_LEN);
-        in.read(buf.array(), 0, HEADER_LEN);
+        int read_len = in.read(buf.array(), 0, HEADER_LEN);
+
+        if(read_len != HEADER_LEN) {
+            return null;
+        }
 
         // Get the length and type from the header
         int len = buf.getInt();

@@ -325,6 +325,10 @@ public class FileHandle {
                 logger.error("Cannot write 0-length piece at index {}", pieceIdx);
                 return checkAvailability();
             }
+            if(piece.length != this.pieceSize && pieceIdx != numPieces - 1) {
+                logger.error("Piece {} is wrong size (actual = {}, expected = {}, self = {})", pieceIdx, piece.length, pieceSize, myid);
+                return checkAvailability();
+            }
             if(pieceIdx * this.pieceSize + piece.length > f.length()) {
                 logger.error("Cannot write piece {}, {} bytes is too large", pieceIdx, piece.length);
                 return checkAvailability();
@@ -334,8 +338,10 @@ public class FileHandle {
         } catch (IOException e) {
             logger.error("Failed writing {} of length {}", pieceIdx, piece.length);
             e.printStackTrace();
+            return true; // this piece failed to write, we still need at least it again
         }
 
+        logger.info("wrote piece {} successfully (self = {})", pieceIdx, myid);
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
         return checkAvailability();

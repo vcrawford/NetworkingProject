@@ -718,6 +718,9 @@ public class PeerProcess {
     private class CompleteHandler implements Subscriber<Boolean> {
         public void onEvent(Event<Boolean> event) throws Exception {
             logger.info("all done, shutting down (self = {})", myid);
+            chokeTimer.cancel();
+            optimisticTimer.cancel();
+            // logger.debug("just kidding, sitting here for all eternity (self = {})", myid);
             for(Integer peer : neighbors.keySet()) {
                 PeerProcess.dispatcher.publish(topic(String.format("peer/%d/close", peer)), true);
             }
