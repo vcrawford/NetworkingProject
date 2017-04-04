@@ -1,4 +1,5 @@
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -80,8 +81,7 @@ public class FileHandle {
 		this.lock = new Object();
 		
 		// Random object to generate random index to be requested
-                // seed at id so peers generate different random numbers
-		this.rand = new Random(myid);
+		this.rand = new Random(); // no seeding is necessary
 
 		/* Open TheFile.dat */
 		String fileNameWithPath = "peer_" + this.myid.toString() + File.separatorChar + this.fileName;
@@ -188,19 +188,19 @@ public class FileHandle {
          */
         public BitSet interestingBits(Integer peerid) {
 
-                BitSet neighbor_bits = this.getBitfield(peerid);
+            BitSet neighbor_bits = this.getBitfield(peerid);
 
-                if (neighbor_bits == null) {
-                    // don't have this neighbor's bits
-		    return new BitSet(this.numPieces);
-                }
+            if (neighbor_bits == null) {
+                // don't have this neighbor's bits
+                return new BitSet(this.numPieces);
+            }
 
-                BitSet interesting_bits = (BitSet) neighbor_bits.clone();
+            BitSet interesting_bits = (BitSet) neighbor_bits.clone();
 
-                // find if they have something we don't
-                neighbor_bits.andNot(this.myBitField);
+            // find if they have something we don't
+            neighbor_bits.andNot(this.myBitField);
 
-                return neighbor_bits;
+            return neighbor_bits;
         }
 
 	/**
@@ -229,43 +229,29 @@ public class FileHandle {
 		// In case the full file have been received, return -1 directly
 		Integer pieceIdx = -1;
 
-                // Find what pieces that this peer has that we are interested in
-                BitSet interesting_bits = this.interestingBits(peerid);
+        // Find what pieces that this peer has that we are interested in
+        BitSet interesting_bits = this.interestingBits(peerid);
 
-                // Has nothing interesting
-                if (interesting_bits.isEmpty()) return -1;
+        // Has nothing interesting
+        if (interesting_bits.isEmpty()) return -1;
 
 		synchronized (lock) {
-			/*
-			 * get a random pieceIdx from myBitField that is not yet received also that is not present in
-			 * idxBeingRequested
-			 */
-			while (this.hasFile == false) {
+            ArrayList<Integer> interesting_indices = new ArrayList<Integer>();
+            for (int i = 0; i < this.numPieces; i++) {
+                if(interesting_bits.get(i) && !this.idxBeingRequested.contains(i)) {
+                    interesting_indices.add(i);
+                }
+            } 
 
-                                Integer rand_num = this.rand.nextInt(this.numPieces);
-
-                                // Take this random number to a bit that is "interesting"
-                                // One must exist, it's either next or previous
-                                Integer randIdx = interesting_bits.nextSetBit(rand_num);
-                                if (randIdx == -1) {
-                                         // There did not exist a next set bit
-                                         randIdx = interesting_bits.previousSetBit(rand_num);  
-                                }
-
-				// Check if index is already being requested
-				if (this.idxBeingRequested.contains(randIdx) == false) {
-					pieceIdx = randIdx;
-					break;
-				}
-
-                                logger.debug("Peer {} will request piece {} from {}", this.myid, randIdx, peerid);
-			}
-
-			if (pieceIdx != -1) {
+            if(interesting_indices.size() != 0) {
+                pieceIdx = interesting_indices.get(this.rand.nextInt(interesting_indices.size()));
 				// Note down that this pieceIdx is being requested from this peerid
 				// This is to make sure that no other peers are requested this piece
 				this.idxBeingRequested.add(pieceIdx);
-			}
+                logger.debug("Peer {} will request piece {} from {}", this.myid, pieceIdx, peerid);
+            } else {
+                logger.debug("Peer {} has no interesting pieces to request from {}", this.myid, peerid);
+            }
 		}
 
 		return pieceIdx;

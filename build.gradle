@@ -20,7 +20,7 @@ dependencies {
     compile group: 'com.mycila', name: 'mycila-pubsub', version: '5.0.ga'
 }
 
-sourceCompatibility = 1.8
+sourceCompatibility = 1.7
 
 // they say no directories
 sourceSets {
