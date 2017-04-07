@@ -159,6 +159,7 @@ public class PeerConnection extends Thread {
 		}
 
         if(msg == null) {
+            logger.warn("null returned from Message.from_stream (self = {})", myid);
             continue;
         }
 

@@ -4,11 +4,14 @@ import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
 import java.util.Arrays;
+import org.slf4j.LoggerFactory;
 
 /**
  * Represents the non-handshake messages.
  */
 class Message {
+    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
+        .getLogger("project.networking.message");
 
     // Header includes 4 byte message length, 1 byte message type
     private static final int HEADER_LEN = 5;
@@ -53,6 +56,7 @@ class Message {
         int read_len = in.read(buf.array(), 0, HEADER_LEN);
 
         if(read_len != HEADER_LEN) {
+            logger.error("failed to read header");
             return null;
         }
 
@@ -60,9 +64,16 @@ class Message {
         int len = buf.getInt();
         Type t = Type.from(buf.get());
 
+        read_len = 0;
         // Read in the payload (which should be of length len)
         ByteBuffer payload = ByteBuffer.allocate(len);
-        in.read(payload.array(), 0, len);
+        while(read_len < len) {
+            read_len += in.read(payload.array(), read_len, len - read_len);
+        }
+        if(read_len != len) {
+            logger.error("failed to read payload (expected {} bytes, got {})", len, read_len);
+            return null;
+        }
         payload.limit(len);
 
         return new Message(t, len, payload);

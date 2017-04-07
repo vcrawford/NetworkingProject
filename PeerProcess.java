@@ -438,7 +438,6 @@ public class PeerProcess {
      */
     private class NotInterestedHandler implements Subscriber<PeerConnection.PeerMessage> {
         public void onEvent(Event<PeerConnection.PeerMessage> event) {
-
             neighborInterestedStatus.put(event.getSource().id,
                 PeerInterestedStatus.NotInterested);
             logger.info("Peer {} received the 'not interested' message from {}",
