@@ -323,10 +323,10 @@ public class PeerProcess {
             message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
 
             logger.info("Sent {} bitfield {} (self={}).", event.getSource().getID(),
-                fH.printableBitSet(fH.getBitfield()), PeerProcess.this.myid);
+                fH.printableBitfield(), PeerProcess.this.myid);
 
-           // Since this is a new neighbor, we should make sure it is set as choked
-	   neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
+            // Since this is a new neighbor, we should make sure it is set as choked
+            neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
         }
     }
 
@@ -505,28 +505,30 @@ public class PeerProcess {
             logger.info("Received piece {} from {} (self = {})", payload.index, event.getSource().id, myid);
 
             // Write it to our file
-            Boolean needMore = fH.writePiece(payload.index, content);
+            Boolean success = fH.writePiece(payload.index, content);
 
-            logger.info("Current bitfield is {} (self={})", fH.printableBitSet(fH.getBitfield()), myid);
+            logger.info("Current bitfield is {} (self={})", fH.printableBitfield(), myid);
 
-            // Send out have message to all peers
-            logger.info("Sending have piece {} message to all peers (self={})", payload.index, myid);
+            if(success) {
+                // Send out have message to all peers
+                logger.info("Sending have piece {} message to all peers (self={})", payload.index, myid);
 
-            Integer[] peerids = neighbors.keySet().toArray(new Integer[neighbors.size()]);
-                       
-            for (int i = 0; i < peerids.length; i++) { 
-               message(peerids[i], Message.index(Message.Type.Have, payload.index));
-            }
+                Integer[] peerids = neighbors.keySet().toArray(new Integer[neighbors.size()]);
 
-            // Set hasFile flag so that Preferred nbrs are chosen randomly in next Unchoke interval
-            if (needMore == false){
-            	PeerProcess.this.hasFile = true;
-                logger.info("Peer {} has downloaded the complete file.", PeerProcess.this.myid);
-
-                if(fH.allComplete()) {
-                    PeerProcess.dispatcher.publish(topic("complete"), true);
+                for (int i = 0; i < peerids.length; i++) { 
+                    message(peerids[i], Message.index(Message.Type.Have, payload.index));
                 }
-        	}
+
+                if (!fH.checkAvailability()){
+                    // Set hasFile flag so that Preferred nbrs are chosen randomly in next Unchoke interval
+                    PeerProcess.this.hasFile = true;
+                    logger.info("Peer {} has downloaded the complete file.", PeerProcess.this.myid);
+
+                    if(fH.allComplete()) {
+                        PeerProcess.dispatcher.publish(topic("complete"), true);
+                    }
+                }
+            }
             
             // Increment the volume score
             neighborVolume.put(event.getSource().id, neighborVolume.get(event.getSource().id) + 1); 

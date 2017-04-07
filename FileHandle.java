@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.Random;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +22,7 @@ import ch.qos.logback.classic.Level;
 public class FileHandle {
     private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
         .getLogger("project.networking.connection");
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     private Integer myid;
     private String fileName;
@@ -33,10 +35,6 @@ public class FileHandle {
     RandomAccessFile f;
     Random rand;
     HashMap<Integer, Double> bwScores;
-
-    // Data structure to apply a lock before self-inquiring which piece to
-    // request. We don't want more than one thread requesting same piece
-    Object lock;
 
     /**
      * Constructor
@@ -77,15 +75,13 @@ public class FileHandle {
         this.idxBeingRequested = new HashMap<Integer, Integer>();
         this.bwScores = new HashMap<Integer, Double>();
 
-        this.lock = new Object();
-
         // Random object to generate random index to be requested
         this.rand = new Random(); // no seeding is necessary
 
         /* Open TheFile.dat */
         String fileNameWithPath = "peer_" + this.myid.toString() + File.separatorChar + this.fileName;
         try {
-            f = new RandomAccessFile(fileNameWithPath, "rw");
+            f = new RandomAccessFile(fileNameWithPath, "rwd");
         } catch (FileNotFoundException e) {
             logger.error("Failed to open: {}", fileNameWithPath);
             e.printStackTrace();
@@ -106,22 +102,26 @@ public class FileHandle {
      * connected peer/s
      */
     public BitSet getBitfield() {
-        return this.myBitField;
+        return (BitSet)this.myBitField.clone();
     }
 
     public int getNumMissing() {
+        lock.readLock().lock();
         int missing = 0;
         for(int i = 0; i < this.numPieces; i++) {
             if(!this.myBitField.get(i)) {
                 missing += 1;
             }
         }
+        lock.readLock().unlock();
 
         return missing;
     }
 
     public boolean allComplete() {
+        lock.readLock().lock();
         if(getNumMissing() > 0) {
+            lock.readLock().unlock();
             logger.debug("don't have complete file, not done (self = {})", myid);
             return false;
         }
@@ -142,6 +142,7 @@ public class FileHandle {
                 logger.debug("peer {} has complete file (self = {})", entry.getKey(), myid);
             }
         }
+        lock.readLock().unlock();
 
         return done;
     }
@@ -151,18 +152,16 @@ public class FileHandle {
      * received piece
      */
     private Boolean updateBitfield(Integer pieceIndex) {
+        lock.writeLock().lock();
         if(pieceIndex >= this.numPieces) {
             logger.error("invalid piece given {} (max = {}) (self = {})", pieceIndex, this.numPieces, myid);
         }
         // Set the bit at pieceIndex to True
-        // lock the file handle
-        synchronized (lock) {
-            this.myBitField.set(pieceIndex);
-        }
+        this.myBitField.set(pieceIndex);
 
         logger.debug("Updating bitfield to have received piece {} (self={})",
                 pieceIndex, this.myid);
-
+        lock.writeLock().unlock();
         return checkAvailability();
     }
 
@@ -170,7 +169,7 @@ public class FileHandle {
     /**
      * Returns True if I still need more pieces. Returns False otherwise
      */
-    private Boolean checkAvailability() {
+    public Boolean checkAvailability() {
         return getNumMissing() > 0;
     }
 
@@ -180,6 +179,7 @@ public class FileHandle {
      * be called only once, right after receiving the bit-field from peer.
      */
     public void setBitfield(Integer peerid, BitSet peerBitField) {
+        lock.writeLock().lock();
         // Store peer's bit-field
         this.peerBitFields.put(peerid, peerBitField);
 
@@ -188,12 +188,14 @@ public class FileHandle {
 
         // TODO: Put proper bandwidth score
         this.bwScores.put(peerid, 0.0);
+        lock.writeLock().unlock();
     }
 
     /**
      * Update whether a peer has a certain piece (when received have message)
      */
     public void updateHasPiece(Integer peerid, Integer piece) {
+        lock.writeLock().lock();
         if(piece >= this.numPieces) {
             logger.error("invalid piece given {} (max = {}) (self = {})", piece, this.numPieces, myid);
         }
@@ -202,25 +204,24 @@ public class FileHandle {
         peer_bits.set(piece);
         logger.debug("Peer {} has been updated to have bit set {}.", peerid,
                 printableBitSet(peer_bits));
-
+        lock.writeLock().unlock();
     }
 
     /**
      * Check whether this peer is interested in that piece
      */
     public boolean interestedInPiece(Integer piece) {
-
-        return !this.myBitField.get(piece);
-
+        lock.readLock().lock();
+        boolean interested = !this.myBitField.get(piece);
+        lock.readLock().unlock();
+        return interested;
     }
 
     /**
      * Get neighbor with id peerid's bitfield
      */
-    public BitSet getBitfield(Integer peerid) {
-
+    private BitSet getBitfield(Integer peerid) {
         return this.peerBitFields.get(peerid);
-
     }
 
     /**
@@ -228,10 +229,11 @@ public class FileHandle {
      * we do not
      */
     public BitSet interestingBits(Integer peerid) {
-
+        lock.readLock().lock();
         BitSet neighbor_bits = this.getBitfield(peerid);
 
         if (neighbor_bits == null) {
+            lock.readLock().unlock();
             // don't have this neighbor's bits
             return new BitSet(this.numPieces);
         }
@@ -241,6 +243,7 @@ public class FileHandle {
         // find if they have something we don't
         interesting_bits.andNot(this.myBitField);
 
+        lock.readLock().unlock();
         return interesting_bits;
     }
 
@@ -248,13 +251,9 @@ public class FileHandle {
      * Is called by peer-thread to determine if I am interested in a peer whose bit-field is given as argument
      */
     public boolean checkInterest(Integer peerid) {
-
+        logger.debug("checkInterest");
         // clone peer's bit field so we can do bit operations on it
         BitSet neighbor_bits = this.interestingBits(peerid);
-
-        // logger.debug("Interested in pieces {} from peer {} (self={})",
-        // this.printableBitSet(neighbor_bits), peerid, this.myid);
-
         return (! neighbor_bits.isEmpty());
     }
 
@@ -263,6 +262,7 @@ public class FileHandle {
      * connected peer with id peerid
      */
     public Integer getPieceIndexToReceive(Integer peerid) {
+        lock.readLock().lock();
         /*
          * Based on bit-field of peer, randomly returns a piece-index that the peer-thread has to request from connected
          * peer
@@ -274,25 +274,30 @@ public class FileHandle {
         BitSet interesting_bits = this.interestingBits(peerid);
 
         // Has nothing interesting
-        if (interesting_bits.isEmpty()) return -1;
+        if (interesting_bits.isEmpty()) {
+            lock.readLock().unlock();
+            return -1;
+        };
 
-        synchronized (lock) {
-            ArrayList<Integer> interesting_indices = new ArrayList<Integer>();
-            for (int i = 0; i < this.numPieces; i++) {
-                if(interesting_bits.get(i) && !this.idxBeingRequested.containsValue(i)) {
-                    interesting_indices.add(i);
-                }
-            } 
-
-            if(interesting_indices.size() != 0) {
-                pieceIdx = interesting_indices.get(this.rand.nextInt(interesting_indices.size()));
-                // Note down that this pieceIdx is being requested from this peerid
-                // This is to make sure that no other peers are requested this piece
-                this.idxBeingRequested.put(peerid, pieceIdx);
-                logger.debug("Peer {} will request piece {} from {}", this.myid, pieceIdx, peerid);
-            } else {
-                logger.debug("Peer {} has no interesting pieces to request from {}", this.myid, peerid);
+        ArrayList<Integer> interesting_indices = new ArrayList<Integer>();
+        for (int i = 0; i < this.numPieces; i++) {
+            if(interesting_bits.get(i) && !this.idxBeingRequested.containsValue(i)) {
+                interesting_indices.add(i);
             }
+        } 
+
+        if(interesting_indices.size() != 0) {
+            lock.readLock().unlock();
+            lock.writeLock().lock();
+            pieceIdx = interesting_indices.get(this.rand.nextInt(interesting_indices.size()));
+            // Note down that this pieceIdx is being requested from this peerid
+            // This is to make sure that no other peers are requested this piece
+            this.idxBeingRequested.put(peerid, pieceIdx);
+            logger.debug("Peer {} will request piece {} from {}", this.myid, pieceIdx, peerid);
+            lock.writeLock().unlock();
+        } else {
+            lock.readLock().unlock();
+            logger.debug("Peer {} has no interesting pieces to request from {}", this.myid, peerid);
         }
 
         return pieceIdx;
@@ -306,7 +311,9 @@ public class FileHandle {
      * @param peerid
      */
     public void cancelPieceIndexRequest(Integer peerid) {
+        lock.writeLock().lock();
         this.idxBeingRequested.remove(peerid);
+        lock.writeLock().unlock();
     }
 
     /**
@@ -320,31 +327,39 @@ public class FileHandle {
      *            piece
      */
     public Boolean writePiece(Integer pieceIdx, byte[] piece) {
+        lock.writeLock().lock();
+        idxBeingRequested.remove(pieceIdx);
         try {
             if(piece.length <= 0) {
+                lock.writeLock().unlock();
                 logger.error("Cannot write 0-length piece at index {}", pieceIdx);
-                return checkAvailability();
+                return false;
             }
             if(piece.length != this.pieceSize && pieceIdx != numPieces - 1) {
+                lock.writeLock().unlock();
                 logger.error("Piece {} is wrong size (actual = {}, expected = {}, self = {})", pieceIdx, piece.length, pieceSize, myid);
-                return checkAvailability();
+                return false;
             }
             if(pieceIdx * this.pieceSize + piece.length > f.length()) {
+                lock.writeLock().unlock();
                 logger.error("Cannot write piece {}, {} bytes is too large", pieceIdx, piece.length);
-                return checkAvailability();
+                return false;
             }
             f.seek(pieceIdx * this.pieceSize);
             f.write(piece);
+            lock.writeLock().unlock();
+            assert(f.getFilePointer() == pieceIdx * this.pieceSize + piece.length);
         } catch (IOException e) {
+            lock.writeLock().unlock();
             logger.error("Failed writing {} of length {}", pieceIdx, piece.length);
             e.printStackTrace();
-            return true; // this piece failed to write, we still need at least it again
+            return false; // this piece failed to write, we still need at least it again
         }
 
         logger.info("wrote piece {} successfully (self = {})", pieceIdx, myid);
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
-        return checkAvailability();
+        return true;
     }
 
     /**
@@ -355,6 +370,7 @@ public class FileHandle {
      *         the length may be lesser than maxPieceLen.
      */
     public byte [] getPieceToSend(Integer pieceIdx) {
+        lock.readLock().lock();
         Integer pieceLen = 0;
         Integer maxPieceLen = this.pieceSize;
         byte [] piece = new byte[maxPieceLen];
@@ -363,12 +379,15 @@ public class FileHandle {
             f.seek(pieceIdx * this.pieceSize);
             pieceLen = f.read(piece);
         } catch (IOException e) {
+            lock.readLock().unlock();
             logger.error("Failed reading piece {} to send", pieceIdx);
             e.printStackTrace();
             return null;
         }
 
-        return Arrays.copyOfRange(piece, 0, pieceLen);
+        byte[] buf = Arrays.copyOfRange(piece, 0, pieceLen);
+        lock.readLock().unlock();
+        return buf;
     }
 
     /**
@@ -380,6 +399,7 @@ public class FileHandle {
      * @return Integer array of k peer IDs
      */
     public Integer[] getPreferredNbrs(Integer k) {
+        lock.readLock().lock();
         /*
          * TODO: Populate array by bwScore values. Currently just sending the first neighbors in the hashmap
          */
@@ -401,6 +421,7 @@ public class FileHandle {
         for (Integer i = numPeers; i < k; i++) {
             ids[i] = -1;
         }
+        lock.writeLock().unlock();
 
         return ids;
     }
@@ -416,7 +437,14 @@ public class FileHandle {
         return bits.get(0, this.numPieces).toString();
     }
 
+    public String printableBitfield() {
+        return printableBitSet(this.myBitField);
+    }
+
     public void close() throws IOException {
+        lock.writeLock().lock();
+        this.f.getFD().sync();
         this.f.close();
+        lock.writeLock().unlock();
     }
 }
