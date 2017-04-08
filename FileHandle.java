@@ -342,7 +342,7 @@ public class FileHandle {
             return false; // this piece failed to write, we still need at least it again
         }
 
-        logger.info("wrote piece {} successfully (self = {})", pieceIdx, myid);
+        logger.debug("wrote piece {} successfully (self = {})", pieceIdx, myid);
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
         return true;

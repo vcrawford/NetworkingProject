@@ -81,6 +81,9 @@ public class PeerConnection extends Thread {
 
             // After the handshake, we should know who the peer is
             assert(this.peer != null);
+            
+            logger.info("Peer {} is connected from Peer {}",
+                    this.myid, this.peer.getID());                 
 
             // Send them our handshake
             this.sendHandshake();
@@ -94,6 +97,9 @@ public class PeerConnection extends Thread {
             // We should know to whom
             assert(this.peer != null);
 
+            logger.info("Peer {} makes a connection to Peer {}",
+                    this.myid, this.peer.getID());            
+            
             // Initiate TCP connection and send handshake
             this.connection = new Socket(this.peer.getHostName(), this.peer.getPort());
             this.sendHandshake();
