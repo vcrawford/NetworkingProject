@@ -20,8 +20,7 @@ import com.mycila.event.*;
  */
 public class PeerConnection extends Thread {
 
-	private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-			.getLogger("project.networking.connection");
+	private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
 
 	private Integer myid; // my ID
 	private Socket connection; // socket

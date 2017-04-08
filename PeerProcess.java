@@ -23,7 +23,7 @@ public class PeerProcess {
     private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
         .getLogger("project.networking");
 
-    public static final Dispatcher dispatcher = Dispatchers.asynchronousSafe(ErrorHandlers.rethrow());
+	public static final Dispatcher dispatcher = Dispatchers.asynchronousSafe(ErrorHandlers.rethrow());
 
     private int myid; // the id of this peer
     private int listenport; // port number this peer listens on
@@ -82,7 +82,6 @@ public class PeerProcess {
 	 * Main function: Starting point
 	 */
 	public static void main(String[] args) throws Exception {
-
 		// Get ID of this peer from input
 		int id = Integer.parseInt(args[0]);
 
@@ -111,7 +110,8 @@ public class PeerProcess {
 	 */
 	public PeerProcess(int id) throws Exception {
 
-		logger.setLevel(Level.DEBUG);
+		logger.setLevel(Level.INFO);
+		//logger.setLevel(Level.DEBUG);
 		logger.debug("peer starting (id = {})", id);
 
 		// peer id
@@ -128,10 +128,16 @@ public class PeerProcess {
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
 
-                this.rand = new Random(System.currentTimeMillis());
+		this.rand = new Random(System.currentTimeMillis());
 	}
 
-
+    /**
+     * @return logger
+     */
+    public static ch.qos.logback.classic.Logger getLogger() {
+		return logger;
+	}
+    
 	/**
 	 * Start connection with each neighbor with ID less than myid
 	 */
