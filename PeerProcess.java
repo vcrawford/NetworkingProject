@@ -126,7 +126,8 @@ public class PeerProcess {
 		registerTimers();
 
 		// Create file-handle instance
-		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize, this.PieceSize);
+		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize,
+                   this.PieceSize, this.neighbors.keySet());
 
                 this.rand = new Random(System.currentTimeMillis());
 	}
@@ -316,14 +317,26 @@ public class PeerProcess {
      */
     private class ConnectedHandler implements Subscriber<NeighborPeer> {
         public void onEvent(Event<NeighborPeer> event) {
-        	//Initialize volume score
-        	neighborVolume.put(event.getSource().getID(), 0);
+
+            //Initialize volume score
+            neighborVolume.put(event.getSource().getID(), 0);
 
             // new connection, we need to send this peer our bitfield
-            message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
+            // TODO: Only send bitfield if we have a non-empty one
 
-            logger.info("Sent {} bitfield {} (self={}).", event.getSource().getID(),
-                fH.printableBitfield(), PeerProcess.this.myid);
+            if (fH.isBitfieldEmpty()) {
+
+               // don't send bitfield if empty
+               logger.debug("Bitfield is empty, will not send (self={})", myid);
+            }
+            else {
+
+               // send bitfield
+               message(event.getSource().getID(), Message.bitfield(PeerProcess.this.fH.getBitfield()));
+
+               logger.info("Sent {} bitfield {} (self={}).", event.getSource().getID(),
+                  fH.printableBitfield(), PeerProcess.this.myid);
+            }
 
             // Since this is a new neighbor, we should make sure it is set as choked
             neighborStatus.put(event.getSource().getID(), PeerStatus.Choked);
@@ -542,6 +555,8 @@ public class PeerProcess {
             if(neighborStat == PeerStatus.Unchoked) {
                 requestPiece(event.getSource().id);   
             }
+
+            // TODO: Re-assess whether we are interested in peers
         }
     }
 

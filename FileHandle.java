@@ -1,8 +1,4 @@
-import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.*;
 import java.util.Map;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -50,7 +46,8 @@ public class FileHandle {
      * @param fileSize
      * @param pieceSize
      */
-    public FileHandle(Integer myid, boolean hasFile, String fileName, Integer fileSize, Integer pieceSize) {
+    public FileHandle(Integer myid, boolean hasFile, String fileName, Integer fileSize,
+       Integer pieceSize, Set<Integer> peerids) {
 
         this.logger.setLevel(Level.DEBUG);
         this.myid = myid;
@@ -74,6 +71,18 @@ public class FileHandle {
                 myid, this.printableBitSet(this.myBitField));
 
         this.peerBitFields = new HashMap<Integer, BitSet>();
+
+        // Give default empty value to peer bitsets since they don't send if they're empty
+        Iterator<Integer> iter = peerids.iterator();
+        while (iter.hasNext()) {
+           Integer peerid = iter.next(); 
+           BitSet peerbits = new BitSet(this.numPieces);
+           peerbits.set(this.numPieces, peerbits.size(), true);
+           this.peerBitFields.put(peerid, peerbits);
+           logger.debug("Peer {} bitfield initialized to {} (self={})",
+              peerid, printableBitSet(peerbits), myid); 
+        }
+
         this.idxBeingRequested = new HashMap<Integer, Integer>();
         this.bwScores = new HashMap<Integer, Double>();
 
@@ -108,6 +117,18 @@ public class FileHandle {
     public BitSet getBitfield() {
         return this.myBitField;
     }
+
+    /**
+     * Checks to see if this peer's bitfield is empty or not
+     */
+    public Boolean isBitfieldEmpty() {
+
+       if (this.myBitField.previousSetBit(this.numPieces - 1) == -1) {
+          return true;
+       }
+
+       return false;
+    } 
 
     public int getNumMissing() {
         int missing = 0;
