@@ -10,8 +10,7 @@ import org.slf4j.LoggerFactory;
  * Represents the non-handshake messages.
  */
 class Message {
-    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-        .getLogger("project.networking.message");
+    private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
 
     // Header includes 4 byte message length, 1 byte message type
     private static final int HEADER_LEN = 5;

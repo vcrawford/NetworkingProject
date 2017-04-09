@@ -15,9 +15,7 @@ import ch.qos.logback.classic.Level;
  * Class to serve as an interface to all file related tasks
  */
 public class FileHandle {
-    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-        .getLogger("project.networking.connection");
-
+	private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
     private Integer myid;
     private String fileName;
     private Integer fileSize;
@@ -49,7 +47,6 @@ public class FileHandle {
     public FileHandle(Integer myid, boolean hasFile, String fileName, Integer fileSize,
        Integer pieceSize, Set<Integer> peerids) {
 
-        this.logger.setLevel(Level.DEBUG);
         this.myid = myid;
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -363,7 +360,7 @@ public class FileHandle {
             return false; // this piece failed to write, we still need at least it again
         }
 
-        logger.info("wrote piece {} successfully (self = {})", pieceIdx, myid);
+        logger.debug("wrote piece {} successfully (self = {})", pieceIdx, myid);
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
         return true;
