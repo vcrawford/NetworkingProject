@@ -124,12 +124,11 @@ public class PeerProcess {
 		// Create file-handle instance
 		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize,
                    this.PieceSize, this.neighbors.keySet());		
+		this.rand = new Random(System.currentTimeMillis());
 		
 		// register event handlers
 		registerHandlers();
 		registerTimers();
-
-		this.rand = new Random(System.currentTimeMillis());
 	}
 
     /**
