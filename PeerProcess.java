@@ -525,12 +525,24 @@ public class PeerProcess {
 
             if(success) {
                 // Send out have message to all peers
+                // Also, send not interested to peers we are no longer interested in after getting this piece
                 logger.debug("Sending have piece {} message to all peers (self={})", payload.index, myid);
 
                 Integer[] peerids = neighbors.keySet().toArray(new Integer[neighbors.size()]);
 
                 for (int i = 0; i < peerids.length; i++) { 
                     message(peerids[i], Message.index(Message.Type.Have, payload.index));
+
+                    // Check if interested in this neighbor any more
+                    if (fH.peerHasPiece(peerids[i], payload.index) &&
+                        !fH.checkInterest(peerids[i])) {
+
+                       message(peerids[i], Message.empty(Message.Type.NotInterested));
+
+                       logger.debug("No longer interested in bitfield {} from {} (self = {}).",
+                          fH.printableBitSet(fH.getBitfield(peerids[i])), peerids[i], myid);
+                    }  
+
                 }
 
                 if (!fH.checkAvailability()){
@@ -558,7 +570,6 @@ public class PeerProcess {
                 requestPiece(event.getSource().id);   
             }
 
-            // TODO: Re-assess whether we are interested in peers
         }
     }
 
@@ -571,7 +582,7 @@ public class PeerProcess {
             // Get which piece out of the message
             Integer idx = ((Message.IndexPayload)event.getSource().msg.getPayload()).index;
             logger.info("Peer {} received the 'have' message from {} for the piece {}.",
-            		myid, idx, event.getSource().id);
+            		myid, event.getSource().id, idx);
 
             fH.updateHasPiece(event.getSource().id, idx);
             if(fH.allComplete()) {

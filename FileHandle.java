@@ -242,6 +242,16 @@ public class FileHandle {
     }
 
     /**
+     * Find if peer has piece 
+     */
+    public Boolean peerHasPiece(Integer peerid, Integer pc) {
+
+       return this.peerBitFields.get(peerid).get(pc);
+
+    }
+
+
+    /**
      * Return a BitSet with true at any index where the peer has a piece but
      * we do not
      */
