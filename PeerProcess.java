@@ -519,10 +519,8 @@ public class PeerProcess {
             byte[] content = new byte[payload.length];
             payload.content.get(content);
 
-            logger.info("Peer {} has downloaded the piece {} from {}", myid, payload.index, event.getSource().id);
-
             // Write it to our file
-            Boolean success = fH.writePiece(payload.index, content);
+            Boolean success = fH.writePiece(payload.index, content, event.getSource().id);
 
             logger.debug("Current bitfield is {} (self={})", fH.printableBitfield(), myid);
 

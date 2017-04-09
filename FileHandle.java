@@ -337,7 +337,7 @@ public class FileHandle {
      *            Length of piece. For the last pieceIdx this parameter should specify the length of valid bytes inside
      *            piece
      */
-    public synchronized Boolean writePiece(Integer pieceIdx, byte[] piece) {
+    public synchronized Boolean writePiece(Integer pieceIdx, byte[] piece, Integer peerid) {
         idxBeingRequested.remove(pieceIdx);
         try {
             if(piece.length <= 0) {
@@ -361,6 +361,11 @@ public class FileHandle {
         }
 
         logger.debug("wrote piece {} successfully (self = {})", pieceIdx, myid);
+        
+        logger.info("Peer {} has downloaded the piece {} from {}. "
+        		+ "Now the number of pieces it has is {}.", 
+        		this.myid, pieceIdx, peerid, (this.numPieces - this.getNumMissing() + 1));        
+        
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
         return true;
