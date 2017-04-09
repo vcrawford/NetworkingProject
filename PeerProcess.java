@@ -121,13 +121,13 @@ public class PeerProcess {
 		readCommonCfgFile();
 		readPeerInfoCfgFile();
 
+		// Create file-handle instance
+		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize,
+                   this.PieceSize, this.neighbors.keySet());		
+		
 		// register event handlers
 		registerHandlers();
 		registerTimers();
-
-		// Create file-handle instance
-		this.fH = new FileHandle(this.myid, this.hasFile, this.FileName, this.FileSize,
-                   this.PieceSize, this.neighbors.keySet());
 
 		this.rand = new Random(System.currentTimeMillis());
 	}
