@@ -8,6 +8,7 @@ import java.util.BitSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import ch.qos.logback.classic.Level;
 
 /**
@@ -15,8 +16,7 @@ import ch.qos.logback.classic.Level;
  */
 public class PeerListener extends Thread {
 
-	private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-			.getLogger("project.networking.connection");
+	private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
 
 	private Integer myid; // my ID
 	ServerSocket listener;
@@ -29,8 +29,6 @@ public class PeerListener extends Thread {
 	 */
 	public PeerListener(PeerProcess parent, Integer myid, Integer num_wait, ServerSocket listener, FileHandle fH)
 			throws Exception {
-
-		this.logger.setLevel(Level.DEBUG);
 		this.parent = parent;
 		this.fH = fH;
 		this.myid = myid;

@@ -20,8 +20,7 @@ import com.mycila.event.*;
  */
 public class PeerConnection extends Thread {
 
-	private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-			.getLogger("project.networking.connection");
+	private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
 
 	private Integer myid; // my ID
 	private Socket connection; // socket
@@ -81,6 +80,9 @@ public class PeerConnection extends Thread {
 
             // After the handshake, we should know who the peer is
             assert(this.peer != null);
+            
+            logger.info("Peer {} is connected from Peer {}",
+                    this.myid, this.peer.getID());                 
 
             // Send them our handshake
             this.sendHandshake();
@@ -94,6 +96,9 @@ public class PeerConnection extends Thread {
             // We should know to whom
             assert(this.peer != null);
 
+            logger.info("Peer {} makes a connection to Peer {}",
+                    this.myid, this.peer.getID());            
+            
             // Initiate TCP connection and send handshake
             this.connection = new Socket(this.peer.getHostName(), this.peer.getPort());
             this.sendHandshake();

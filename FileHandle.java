@@ -1,8 +1,4 @@
-import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.*;
 import java.util.Map;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -19,9 +15,7 @@ import ch.qos.logback.classic.Level;
  * Class to serve as an interface to all file related tasks
  */
 public class FileHandle {
-    private static final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) LoggerFactory
-        .getLogger("project.networking.connection");
-
+	private static final ch.qos.logback.classic.Logger logger = PeerProcess.getLogger();
     private Integer myid;
     private String fileName;
     private Integer fileSize;
@@ -50,9 +44,9 @@ public class FileHandle {
      * @param fileSize
      * @param pieceSize
      */
-    public FileHandle(Integer myid, boolean hasFile, String fileName, Integer fileSize, Integer pieceSize) {
+    public FileHandle(Integer myid, boolean hasFile, String fileName, Integer fileSize,
+       Integer pieceSize, Set<Integer> peerids) {
 
-        this.logger.setLevel(Level.DEBUG);
         this.myid = myid;
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -74,6 +68,18 @@ public class FileHandle {
                 myid, this.printableBitSet(this.myBitField));
 
         this.peerBitFields = new HashMap<Integer, BitSet>();
+
+        // Give default empty value to peer bitsets since they don't send if they're empty
+        Iterator<Integer> iter = peerids.iterator();
+        while (iter.hasNext()) {
+           Integer peerid = iter.next(); 
+           BitSet peerbits = new BitSet(this.numPieces);
+           peerbits.set(this.numPieces, peerbits.size(), true);
+           this.peerBitFields.put(peerid, peerbits);
+           logger.debug("Peer {} bitfield initialized to {} (self={})",
+              peerid, printableBitSet(peerbits), myid); 
+        }
+
         this.idxBeingRequested = new HashMap<Integer, Integer>();
         this.bwScores = new HashMap<Integer, Double>();
 
@@ -108,6 +114,18 @@ public class FileHandle {
     public BitSet getBitfield() {
         return this.myBitField;
     }
+
+    /**
+     * Checks to see if this peer's bitfield is empty or not
+     */
+    public Boolean isBitfieldEmpty() {
+
+       if (this.myBitField.previousSetBit(this.numPieces - 1) == -1) {
+          return true;
+       }
+
+       return false;
+    } 
 
     public int getNumMissing() {
         int missing = 0;
@@ -224,6 +242,16 @@ public class FileHandle {
     }
 
     /**
+     * Find if peer has piece 
+     */
+    public Boolean peerHasPiece(Integer peerid, Integer pc) {
+
+       return this.peerBitFields.get(peerid).get(pc);
+
+    }
+
+
+    /**
      * Return a BitSet with true at any index where the peer has a piece but
      * we do not
      */
@@ -319,7 +347,7 @@ public class FileHandle {
      *            Length of piece. For the last pieceIdx this parameter should specify the length of valid bytes inside
      *            piece
      */
-    public synchronized Boolean writePiece(Integer pieceIdx, byte[] piece) {
+    public synchronized Boolean writePiece(Integer pieceIdx, byte[] piece, Integer peerid) {
         idxBeingRequested.remove(pieceIdx);
         try {
             if(piece.length <= 0) {
@@ -342,7 +370,12 @@ public class FileHandle {
             return false; // this piece failed to write, we still need at least it again
         }
 
-        logger.info("wrote piece {} successfully (self = {})", pieceIdx, myid);
+        logger.debug("wrote piece {} successfully (self = {})", pieceIdx, myid);
+        
+        logger.info("Peer {} has downloaded the piece {} from {}. "
+        		+ "Now the number of pieces it has is {}.", 
+        		this.myid, pieceIdx, peerid, (this.numPieces - this.getNumMissing() + 1));        
+        
         // Add this piece to my bit-field
         this.updateBitfield(pieceIdx);
         return true;
